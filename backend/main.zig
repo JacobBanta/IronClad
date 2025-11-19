@@ -76,13 +76,21 @@ pub fn main() !void {
                 std.debug.print("ERROR: non 200 status: {d}\n", .{@intFromEnum(fetch_result.status)});
                 std.process.exit(1);
             }
+
             const object = try std.json.parseFromSlice(struct { models: []const struct { name: []const u8 } }, allocator, response_writer.written(), .{ .allocate = .alloc_if_needed, .ignore_unknown_fields = true });
             defer object.deinit();
 
-            if (res.args.json != 0) {} else {
-                var stdout_storage: [256]u8 = undefined;
-                var stdout_state = std.fs.File.stdout().writer(&stdout_storage);
-                const out = &stdout_state.interface;
+            // creates a buffered writer to stdio
+            var stdout_storage: [256]u8 = undefined;
+            var stdout_state = std.fs.File.stdout().writer(&stdout_storage);
+            const out = &stdout_state.interface;
+
+            // chooses which format to print
+            if (res.args.json != 0) {
+                try std.json.Stringify.value(object.value, .{}, out);
+                try out.flush();
+                return;
+            } else {
                 for (object.value.models) |model| {
                     try out.print("{s}\n", .{model.name});
                 }
