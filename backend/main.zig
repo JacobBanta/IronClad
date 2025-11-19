@@ -4,6 +4,7 @@ const std = @import("std");
 pub fn main() !void {
     var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
 
     const help_message =
         \\-h, --help                    Display this help and exit.
@@ -20,9 +21,9 @@ pub fn main() !void {
         \\-m, --mode <MODE>             Specify operation mode. Defaults to diff.
         \\          full                Do a full code scan.
         \\          diff                Do a scan over the git diffs.
-        \\          spot                Do a spot check on a file.
+        \\          file                Do a spot check on a file.
         \\    --diff <STRING>           If mode is diff, specify a commit to do a diff against.
-        \\    --file <FILE>             If mode is spot, specify file for the spot check.
+        \\    --file <FILE>             If mode is file, specify file for the spot check.
         \\<STRING>                      Optional path.
         \\
     ;
@@ -34,13 +35,13 @@ pub fn main() !void {
         .PATH = clap.parsers.string,
         .INTEGER = clap.parsers.int(isize, 10),
         .PROVIDER = clap.parsers.enumeration(enum { ollama, openrouter, vscode }),
-        .MODE = clap.parsers.enumeration(enum { full, diff, spot }),
+        .MODE = clap.parsers.enumeration(enum { full, diff, file }),
     };
 
     var diag = clap.Diagnostic{};
     var res = clap.parse(clap.Help, &params, parsers, .{
         .diagnostic = &diag,
-        .allocator = gpa.allocator(),
+        .allocator = allocator,
     }) catch |err| {
         try diag.reportToFile(.stderr(), err);
         return err;
@@ -50,6 +51,45 @@ pub fn main() !void {
     if (res.args.help != 0) {
         std.debug.print(help_message, .{});
         return;
+    }
+
+    if (res.args.provider orelse .ollama == .ollama) {
+        var client = std.http.Client{ .allocator = allocator };
+        defer client.deinit();
+
+        const endpoint = res.args.endpoint orelse "http://127.0.0.1:11434";
+        if (res.args.@"list-models" != 0) {
+            var url_buffer: [64]u8 = undefined;
+            const url = try std.fmt.bufPrint(&url_buffer, "{s}/api/tags", .{endpoint});
+
+            var response_writer = std.Io.Writer.Allocating.init(allocator);
+            defer response_writer.deinit();
+
+            const fetch_result = client.fetch(.{
+                .location = .{ .url = url },
+                .response_writer = &response_writer.writer,
+            }) catch |e| {
+                std.debug.print("{any}\n", .{e});
+                std.process.exit(1);
+            };
+            if (@intFromEnum(fetch_result.status) != 200) {
+                std.debug.print("ERROR: non 200 status: {d}\n", .{@intFromEnum(fetch_result.status)});
+                std.process.exit(1);
+            }
+            const object = try std.json.parseFromSlice(struct { models: []const struct { name: []const u8 } }, allocator, response_writer.written(), .{ .allocate = .alloc_if_needed, .ignore_unknown_fields = true });
+            defer object.deinit();
+
+            if (res.args.json != 0) {} else {
+                var stdout_storage: [256]u8 = undefined;
+                var stdout_state = std.fs.File.stdout().writer(&stdout_storage);
+                const out = &stdout_state.interface;
+                for (object.value.models) |model| {
+                    try out.print("{s}\n", .{model.name});
+                }
+                try out.flush();
+                return;
+            }
+        }
     }
     std.debug.print("Unsupported usage.\nUse -h to display help message.\n", .{});
 }
