@@ -7,7 +7,7 @@ pub fn build(b: *std.Build) void {
         std.Target.Query{ .os_tag = .macos, .cpu_arch = .aarch64 },
         std.Target.Query{ .os_tag = .linux, .cpu_arch = .x86_64 },
     };
-    if (b.option(bool, "release", "build executible for all targets") orelse false) {
+    if (b.option(bool, "release", "build executable for all targets") orelse false) {
         inline for (release_targets) |release_target| {
             const mod = b.createModule(.{ .root_source_file = b.path("main.zig"), .target = b.resolveTargetQuery(release_target), .optimize = .ReleaseSafe });
             const exe = b.addExecutable(.{ .name = "IronClad_" ++ @tagName(release_target.os_tag.?) ++ "_" ++ @tagName(release_target.cpu_arch.?), .root_module = mod });
