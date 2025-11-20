@@ -22,6 +22,9 @@ export function activate(context: vscode.ExtensionContext) {
   );}
 
 
+  const terminal = vscode.window.createTerminal(
+	"ironcladTerminal", 
+  );
   //make only allow user to select from the three options ollama openrouter vscode
   // avalable in menu and also through the command pallet
   const provider = vscode.commands.registerCommand(
