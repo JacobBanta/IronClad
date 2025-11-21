@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   width="609.16748"
+   height="763.91858"
+   viewBox="0 0 609.16748 763.91858"
+   version="1.1"
+   id="svg1"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <defs
+     id="defs1" />
+  <g
+     id="layer1"
+     transform="translate(-492.06421,1.0561296)">
+    <path
+       id="path1"
+       style="fill:#ffffff;stroke:#ffffff;stroke-width:1.05613"
+       d="M 754.17292,0 690.47176,111.05664 799.2159,298.18555 972.2882,596.00976 1100.3156,595.64844 927.24325,297.82422 Z" />
+    <path
+       style="fill:#ffffff;stroke:#ffffff"
+       id="path3"
+       d="m 774.35327,698.2436 46.58899,-80.6945 46.58899,-80.6945 46.58899,80.6945 46.58899,80.6945 -93.17798,0 z"
+       transform="rotate(-60.688006,810.73163,757.44787)" />
+    <path
+       style="fill:#ffffff;stroke:#ffffff"
+       id="path4"
+       d="m 774.35327,698.2436 46.58899,-80.6945 46.58899,-80.6945 46.58899,80.6945 46.58899,80.6945 -93.17798,0 z"
+       transform="rotate(-60.688006,879.17659,637.23665)" />
+    <path
+       style="fill:#ffffff;stroke:#ffffff"
+       id="path5"
+       d="m 774.35327,698.2436 46.58899,-80.6945 46.58899,-80.6945 46.58899,80.6945 46.58899,80.6945 -93.17798,0 z"
+       transform="rotate(-60.688006,742.28666,877.65909)" />
+    <rect
+       style="fill:#ffffff;stroke:#ffffff;stroke-width:0.639822"
+       id="rect5"
+       width="142.04039"
+       height="47.346798"
+       x="-892.94397"
+       y="-3.7291367"
+       transform="rotate(-150)" />
+    <rect
+       style="fill:#ffffff;stroke:#ffffff;stroke-width:0.639822"
+       id="rect6"
+       width="142.04039"
+       height="47.346798"
+       x="-51.075947"
+       y="703.55676"
+       transform="rotate(-60)" />
+    <rect
+       style="fill:#ffffff;stroke:#ffffff"
+       id="rect7"
+       width="182"
+       height="91"
+       x="492.56421"
+       y="429.37042" />
+    <rect
+       style="fill:#ffffff;stroke:#ffffff;stroke-width:0.338834"
+       id="rect8"
+       width="70.368271"
+       height="27.021557"
+       x="548.38013"
+       y="520.37042" />
+    <path
+       id="rect9"
+       style="fill:#ffffff;stroke:#ffffff;stroke-width:0.67073"
+       d="m 514.9171,568.98064 32.91483,-22.11601 71.08549,0.079 33.29393,22.037 4.59619,31.56272 -150.37572,1.06066 z" />
+  </g>
+</svg>

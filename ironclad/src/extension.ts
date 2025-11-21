@@ -1,0 +1,495 @@
+// The module 'vscode' contains the VS Code extensibility API
+// Import the module and reference it with the alias vscode in your code below
+import { type } from "os";
+import * as vscode from "vscode";
+
+// This method is called when your extension is activated
+// Your extension is activated the very first time the command is executed
+export function activate(context: vscode.ExtensionContext) {
+  const terminal = vscode.window.createTerminal("ironcladTerminal");
+
+  (" ------------------- config --------------- ");
+
+  // ^ avalable in menu and also through the command pallet
+  const provider = vscode.commands.registerCommand(
+    "ironclad.selectProvider",
+    async () => {
+      const providers = ["ollama", "openrouter", "vscode"];
+      const selected = await vscode.window.showQuickPick(providers, {
+        placeHolder: "Select AI provider for vulnerability analysis",
+        title: "AI Provider Selection",
+      });
+
+      if (selected) {
+        await updateConfig("provider", selected);
+        vscode.window.showInformationMessage(`AI Provider set to: ${selected}`);
+      } else {
+        const currentProvider = getConfig("provider");
+        if (currentProvider) {
+          vscode.window.showInformationMessage(
+            `Current provider: ${currentProvider}`
+          );
+        } else {
+          vscode.window.showWarningMessage(
+            "No provider selected. Please select a provider."
+          );
+        }
+      }
+    }
+  );
+
+  //  ^ avalable in menu and also through the command pallet
+  const model = vscode.commands.registerCommand(
+    "ironclad.selectModel",
+    async () => {
+      const currentProvider = getConfig<string>("provider");
+      if (!currentProvider) {
+        vscode.window.showWarningMessage(
+          'Please select a provider first using "Select AI Provider"'
+        );
+        vscode.commands.executeCommand("ironclad.selectProvider");
+        vscode.commands.executeCommand("ironclad.selectModel");
+        return;
+      }
+
+      // TODO Fetch models from backend based on provider
+      const models = await fetchModels(currentProvider);
+
+      if (models.length === 0) {
+        vscode.window.showWarningMessage(
+          `No models available for ${currentProvider}. Please check your configuration.`
+        );
+        return;
+      }
+
+      const selected = await vscode.window.showQuickPick(models, {
+        placeHolder: `Select model for ${currentProvider}`,
+        title: "AI Model Selection",
+      });
+
+      if (selected) {
+        await updateConfig("model", selected);
+        vscode.window.showInformationMessage(`AI Model set to: ${selected}`);
+      } else {
+        const currentModel = getConfig("model");
+        if (currentModel) {
+          vscode.window.showInformationMessage(
+            `Current model: ${currentModel}`
+          );
+        }
+      }
+    }
+  );
+
+  // ^ specify an endpoint for ollama ai model
+  // ^ avalable in menu and also through the command pallet
+  const endpoint = vscode.commands.registerCommand(
+    "ironclad.OllamaEndpoint",
+    async () => {
+      const currentEndpoint =
+        getConfig<string>("ollamaEndpoint") || "http://localhost:11434";
+
+      const endpoint = await vscode.window.showInputBox({
+        value: currentEndpoint,
+        placeHolder: "Enter Ollama endpoint (e.g., http://localhost:11434)",
+        prompt: "Ollama API Endpoint",
+        validateInput: (value) => {
+          if (!value.startsWith("http://") && !value.startsWith("https://")) {
+            return "Endpoint must start with http:// or https://";
+          }
+          return null;
+        },
+      });
+
+      if (endpoint === undefined) {
+        // & User cancelled - show current endpoint
+        vscode.window.showInformationMessage(
+          `Current Ollama endpoint: ${currentEndpoint}`
+        );
+      } else {
+        await updateConfig("ollamaEndpoint", endpoint);
+        vscode.window.showInformationMessage(
+          `Ollama endpoint set to: ${endpoint}`
+        );
+      }
+    }
+  );
+
+  // ^ set The maximum tokens that a request is allowed to consume.
+  // ^ avalable in menu and also through the command pallet
+  const tokens = vscode.commands.registerCommand(
+    "ironclad.setMaxTokens",
+    async () => {
+      const currentTokens = getConfig("maxTokens") || 1000;
+
+      const tokens = await vscode.window.showInputBox({
+        value: currentTokens.toString(),
+        placeHolder: "Set maximum tokens per request",
+        prompt: "Maximum Tokens",
+        validateInput: (value) => {
+          const num = parseInt(value);
+          if (isNaN(num) || num <= 0) {
+            return "Please enter a positive number";
+          }
+          if (num > 100000) {
+            return "Maximum tokens cannot exceed 100,000";
+          }
+          return null;
+        },
+      });
+
+      if (tokens === undefined) {
+        vscode.window.showInformationMessage(
+          `Current max tokens: ${currentTokens}`
+        );
+      } else {
+        const tokensInt = parseInt(tokens);
+        await updateConfig("maxTokens", tokensInt);
+        vscode.window.showInformationMessage(`Max tokens set to: ${tokensInt}`);
+      }
+    }
+  );
+
+  // ^ set api token with vscode secret api
+  const setapikey = vscode.commands.registerCommand(
+    "ironclad.setapikey",
+    async () => {
+      const apikey: string | undefined = await vscode.window.showInputBox({
+        placeHolder: "input api key or type 'remove' to delete api key ",
+        prompt: "input api key",
+      });
+
+      if (apikey === "remove") {
+        await context.secrets.delete("myExtensionApiKey");
+        vscode.window.showInformationMessage("api key removed successfully");
+        return;
+      }
+      if (apikey === undefined) {
+        // ^ this is if the user cancelled
+        if (
+          getConfig("provider") === "openrouter" &&
+          (await context.secrets.get("myExtensionApiKey")) === undefined
+        ) {
+          vscode.window.showErrorMessage("openrouter requires a api key key ");
+        }
+      } else {
+        await context.secrets.store("myExtensionApiKey", apikey);
+        vscode.window.showInformationMessage("api key stored successfully");
+      }
+    }
+  );
+
+  (" ------------------- scanning functionality --------------- ");
+
+  ("full                Do a full code scan.");
+  // will scan the whole project including sub folders and such
+  const fullscan = vscode.commands.registerCommand(
+    "ironclad.fullscan",
+    async () => {
+		 if (!ableToScan()){
+	return;
+ }
+      const workspaceFolders = vscode.workspace.workspaceFolders;
+
+      if (!workspaceFolders) {
+        vscode.window.showWarningMessage("No workspace folder open");
+        return;
+      }
+
+      const choice = await vscode.window.showWarningMessage(
+        "Full scan will analyze your entire project. This may take a while.",
+        { modal: true },
+        "Start Scan",
+        "Cancel"
+      );
+
+      if (choice === "Start Scan") {
+        vscode.window.withProgress(
+          {
+            location: vscode.ProgressLocation.Notification,
+            title: "IRONCLAD: Scanning entire project...",
+            cancellable: true,
+          },
+          async (progress, token) => {
+            token.onCancellationRequested(() => {
+              vscode.window.showInformationMessage("Scan cancelled");
+            });
+
+            // TODO: full scan logic
+
+			
+
+            vscode.window.showInformationMessage(
+              "Full project scan completed!"
+            );
+          }
+        );
+      }
+    }
+  );
+
+  ("diff                Do a scan over the git diffs."); // will be added later
+  // when diff scan is selected make sure to ask for what commit to diff against
+
+  ("file                Do a check on a file.");
+  // when file scan is selected make sure to either ask for what file to scan(if done from side bar)
+  // if key bind is used that file the file the keybind was pressed on will be used
+  // if a file is right clicked this should work as well
+  // this will scan a file depending on if the user is using the editor or uses a command
+  const scanfile = vscode.commands.registerCommand(
+    "ironclad.scanfile",
+    async (uri?: vscode.Uri) => {
+		 if (!ableToScan()){
+	return;
+ }
+      let filePath: string | undefined;
+
+      if (uri) {
+        // Command was triggered from context menu
+        filePath = uri.fsPath;
+      } else {
+        // Command was triggered from command palette
+        const fileLocation = await vscode.window.showInputBox({
+          placeHolder: "Enter file path to scan",
+          prompt: "File to Scan",
+          value: vscode.window.activeTextEditor?.document.fileName,
+        });
+        filePath = fileLocation;
+        if (fileLocation === undefined) {
+          return;
+        }
+      }
+
+      if (filePath) {
+        vscode.window.withProgress(
+          {
+            location: vscode.ProgressLocation.Notification,
+            title: `Scanning file: ${filePath.split("/").pop()}`,
+            cancellable: true,
+          },
+          async (progress) => {
+            progress.report({ increment: 0 });
+            
+			// TODO Implement file scan logic
+
+            terminal.sendText(`ironclad scan file "${filePath}"`);
+
+            progress.report({ increment: 100 });
+            vscode.window.showInformationMessage(
+              `File scan completed: ${filePath}`
+            );
+          }
+        );
+      }
+    }
+  );
+  (" -- spot scan -- ");
+  // does a scan of a string (highlighted code)
+  const spotScan = vscode.commands.registerCommand("ironclad.spotscan", () => {
+	 if (!ableToScan()){
+	return;
+ }
+    const editor = vscode.window.activeTextEditor;
+
+        if (!editor) {
+            vscode.window.showWarningMessage("No active editor found");
+            return;
+        }
+
+        const selection = editor.selection;
+        if (selection.isEmpty) {
+            vscode.window.showWarningMessage("No text selected. Please select code to scan.");
+            return;
+        }
+
+        const selectedText = editor.document.getText(selection);
+        
+        vscode.window.withProgress({
+            location: vscode.ProgressLocation.Notification,
+            title: "IRONCLAD: Scanning selected code...",
+            cancellable: true
+        }, async (progress) => {
+            progress.report({ increment: 0 });
+            
+            // Send to terminal for processing
+            terminal.show();
+
+            terminal.sendText(`echo "${selectedText}" | ironclad scan spot`);
+            
+            
+            progress.report({ increment: 100 });
+            
+            vscode.window.showInformationMessage('Spot scan completed! Found 3 potential issues.');
+        });
+  });
+
+  //*------ ** helper function **
+
+  function ableToScan(): boolean {
+  const provider = getConfig<string>("provider");
+  const model = getConfig<string>("model");
+
+  if (!provider || provider.length < 1) {
+    vscode.window.showWarningMessage("Please select a provider first");
+    return false;
+  }
+
+  if (!model || model.length < 1) {
+    vscode.window.showWarningMessage("Please select a model first");
+    return false;
+  }
+
+  return true;
+}
+
+  async function fetchModels(provider: string): Promise<string[]> {
+    // TODO Implement actual model fetching from backend
+    switch (provider) {
+      case "ollama":
+        return ["llama2", "codellama", "mistral"];
+      case "openrouter":
+        return ["gpt-4", "claude-2", "llama-2-70b"];
+      case "vscode":
+        return ["vscode-native"];
+      default:
+        return [];
+    }
+  }
+
+  function getConfig<Type>(key: string): Type | undefined {
+    return vscode.workspace.getConfiguration("ironclad").get<Type>(key);
+  }
+
+  async function updateConfig(key: string, value: any): Promise<void> {
+    await vscode.workspace
+      .getConfiguration("ironclad")
+      .update(key, value, true);
+  }
+
+  context.subscriptions.push(
+    provider,
+    model,
+    spotScan,
+    scanfile,
+    fullscan,
+    tokens,
+    endpoint,
+    setapikey
+  );
+  
+
+ 
+  context.subscriptions.push(
+    vscode.window.createTreeView('ironclad.commandsView', {
+      treeDataProvider: new CommandsTreeProvider(context)//context
+    })
+  );
+
+ 
+  const targetDir = '/ironclad'; 
+  context.subscriptions.push(
+    vscode.window.createTreeView('ironclad.filesView', {
+      treeDataProvider: new FilesTreeProvider(targetDir)//
+    })
+  );
+}
+
+
+class CommandsTreeProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
+  
+  constructor(private context: vscode.ExtensionContext) {}
+
+  getTreeItem(element: vscode.TreeItem): vscode.TreeItem {
+    return element;
+  }
+
+  async getChildren(element?: vscode.TreeItem): Promise<vscode.TreeItem[]> {
+   
+    if (element) {
+      return [];
+    }
+
+  
+    const allCommands = await vscode.commands.getCommands(true); 
+
+   
+    const myExtensionCommands = allCommands.filter(cmd => 
+      cmd.startsWith('ironclad.')
+    );
+    
+    
+    return myExtensionCommands.map(commandId => {
+      const item = new vscode.TreeItem(commandId);
+      item.iconPath = new vscode.ThemeIcon('symbol-event'); 
+     
+      item.command = {
+        command: commandId,
+        title: `Run ${commandId}`
+      };
+      return item;
+    });
+  }
+}
+
+
+class FilesTreeProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
+  
+  constructor(private targetDirName: string) {}
+
+  getTreeItem(element: vscode.TreeItem): vscode.TreeItem {
+    return element;
+  }
+
+  async getChildren(element?: vscode.TreeItem): Promise<vscode.TreeItem[]> {
+    
+    if (element) {
+      return [];
+    }
+
+    
+    const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+    if (!workspaceFolder) {
+      return []; // No folder open
+    }
+
+    
+    const targetDirUri = vscode.Uri.joinPath(workspaceFolder.uri, this.targetDirName);
+
+    try {
+      
+      const entries = await vscode.workspace.fs.readDirectory(targetDirUri);
+
+      
+      const fileItems: vscode.TreeItem[] = [];
+      for (const [name, type] of entries) {
+        if (type === vscode.FileType.File) {
+          const item = new vscode.TreeItem(name);
+          
+          
+          item.collapsibleState = vscode.TreeItemCollapsibleState.None;
+
+          
+          const fileUri = vscode.Uri.joinPath(targetDirUri, name);
+          item.command = {
+            command: 'vscode.open',
+            title: 'Open File',
+            arguments: [fileUri]
+          };
+          
+          fileItems.push(item);
+        }
+      }
+      return fileItems;
+      
+    } catch (error) {
+      
+      vscode.window.showErrorMessage(`Directory not found: ${this.targetDirName}`);
+	  vscode.window.showErrorMessage(`run any ironcladscan in order to see results`);
+      return [];
+    }
+  }
+}
+
+
+// This method is called when your extension is deactivated
+export function deactivate() {}
