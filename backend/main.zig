@@ -61,30 +61,33 @@ pub fn main() !void {
         return;
     }
 
-    if (res.args.provider orelse .ollama == .ollama) {
-        var client = std.http.Client{ .allocator = allocator };
-        defer client.deinit();
+    var endpoint = try std.Uri.parse(if (res.args.provider orelse .ollama == .ollama) res.args.endpoint orelse "http://127.0.0.1:11434" else "https://openrouter.ai");
+    var client = std.http.Client{ .allocator = allocator };
+    defer client.deinit();
 
-        const endpoint = res.args.endpoint orelse "http://127.0.0.1:11434";
+    if (res.args.@"list-models" != 0) {
+        var response_writer = std.Io.Writer.Allocating.init(allocator);
+        defer response_writer.deinit();
+        switch (res.args.provider orelse .ollama) {
+            .ollama => endpoint.path = .{ .raw = "/api/tags" },
+            .openrouter => endpoint.path = .{ .raw = "/api/v1/models" },
+            else => return error.Unimplemented,
+        }
 
-        if (res.args.@"list-models" != 0) {
-            var response_writer = std.Io.Writer.Allocating.init(allocator);
-            defer response_writer.deinit();
-            var url_buffer: [64]u8 = undefined;
-            const url = try std.fmt.bufPrint(&url_buffer, "{s}/api/tags", .{endpoint});
+        const fetch_result = client.fetch(.{
+            .location = .{ .uri = endpoint },
+            .response_writer = &response_writer.writer,
+            .headers = .{ .authorization = .{ .override = "Bearer " ++ @embedFile("API.KEY") } },
+        }) catch |e| {
+            std.debug.print("{any}\n", .{e});
+            std.process.exit(1);
+        };
+        if (@intFromEnum(fetch_result.status) != 200) {
+            std.debug.print("ERROR: non 200 status: {d}\n", .{@intFromEnum(fetch_result.status)});
+            std.process.exit(1);
+        }
 
-            const fetch_result = client.fetch(.{
-                .location = .{ .url = url },
-                .response_writer = &response_writer.writer,
-            }) catch |e| {
-                std.debug.print("{any}\n", .{e});
-                std.process.exit(1);
-            };
-            if (@intFromEnum(fetch_result.status) != 200) {
-                std.debug.print("ERROR: non 200 status: {d}\n", .{@intFromEnum(fetch_result.status)});
-                std.process.exit(1);
-            }
-
+        if ((res.args.provider orelse .ollama) == .ollama) {
             const object = try std.json.parseFromSlice(struct { models: []const struct { name: []const u8 } }, allocator, response_writer.written(), .{ .allocate = .alloc_if_needed, .ignore_unknown_fields = true });
             defer object.deinit();
 
@@ -100,7 +103,31 @@ pub fn main() !void {
                 try out.flush();
                 return;
             }
+        } else {
+            const object = try std.json.parseFromSlice(struct { data: []const struct { id: []const u8 } }, allocator, response_writer.written(), .{ .allocate = .alloc_if_needed, .ignore_unknown_fields = true });
+            defer object.deinit();
+
+            // chooses which format to print
+            if (res.args.json != 0) {
+                _ = try out.writeAll("{ \"models\": [ ");
+                for (object.value.data, 0..) |model, i| {
+                    try out.print("{{ \"name\": \"{s}\" }}", .{model.id});
+                    if (i != object.value.data.len - 1)
+                        _ = try out.writeAll(", ");
+                }
+                _ = try out.writeAll("]  }");
+                try out.flush();
+                return;
+            } else {
+                for (object.value.data) |model| {
+                    try out.print("{s}\n", .{model.id});
+                }
+                try out.flush();
+                return;
+            }
         }
+    }
+    if ((res.args.provider orelse .ollama) == .ollama) {
         if (res.args.model != null) {
             switch (res.args.mode orelse .file) {
                 .file => {
@@ -238,6 +265,10 @@ pub fn process(res: anytype, allocator: std.mem.Allocator, client: *std.http.Cli
             .location = .{ .url = url },
             .response_writer = &response_writer.writer,
             .payload = payload.written(),
+            .headers = .{
+                .authorization = .{ .override = "Bearer " ++ @embedFile("API.KEY") },
+                .content_type = .{ .override = "application/json" },
+            },
         }) catch |e| {
             std.debug.print("{any}\n", .{e});
             std.process.exit(1);
