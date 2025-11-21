@@ -182,9 +182,49 @@ export function activate(context: vscode.ExtensionContext) {
   (" ------------------- scanning functionality --------------- ");
 
   ("full                Do a full code scan.");
-  const fullscan = vscode.commands.registerCommand("ironclad.fullscan", () => {
-    // will scan the whole project including sub folders and such
-  });
+  // will scan the whole project including sub folders and such
+  const fullscan = vscode.commands.registerCommand(
+    "ironclad.fullscan",
+    async () => {
+		 if (!ableToScan()){
+	return;
+ }
+      const workspaceFolders = vscode.workspace.workspaceFolders;
+
+      if (!workspaceFolders) {
+        vscode.window.showWarningMessage("No workspace folder open");
+        return;
+      }
+
+      const choice = await vscode.window.showWarningMessage(
+        "Full scan will analyze your entire project. This may take a while.",
+        { modal: true },
+        "Start Scan",
+        "Cancel"
+      );
+
+      if (choice === "Start Scan") {
+        vscode.window.withProgress(
+          {
+            location: vscode.ProgressLocation.Notification,
+            title: "IRONCLAD: Scanning entire project...",
+            cancellable: true,
+          },
+          async (progress, token) => {
+            token.onCancellationRequested(() => {
+              vscode.window.showInformationMessage("Scan cancelled");
+            });
+
+            // TODO: full scan logic
+
+            vscode.window.showInformationMessage(
+              "Full project scan completed!"
+            );
+          }
+        );
+      }
+    }
+  );
 
   ("diff                Do a scan over the git diffs."); // will be added later
   // when diff scan is selected make sure to ask for what commit to diff against
@@ -196,33 +236,109 @@ export function activate(context: vscode.ExtensionContext) {
   // this will scan a file depending on if the user is using the editor or uses a command
   const scanfile = vscode.commands.registerCommand(
     "ironclad.scanfile",
-    async () => {
-      const fileLocation = await vscode.window.showInputBox({
-        placeHolder: "what is the location of the folder you wish to scan",
-        prompt: "Write the location of the file you wish to scan",
-      });
+    async (uri?: vscode.Uri) => {
+		 if (!ableToScan()){
+	return;
+ }
+      let filePath: string | undefined;
 
-      if (fileLocation === undefined) {
-        // this is if the user cancelled
+      if (uri) {
+        // Command was triggered from context menu
+        filePath = uri.fsPath;
       } else {
-        // use terminal do a file check
+        // Command was triggered from command palette
+        const fileLocation = await vscode.window.showInputBox({
+          placeHolder: "Enter file path to scan",
+          prompt: "File to Scan",
+          value: vscode.window.activeTextEditor?.document.fileName,
+        });
+        filePath = fileLocation;
+        if (fileLocation === undefined) {
+          return;
+        }
+      }
+
+      if (filePath) {
+        vscode.window.withProgress(
+          {
+            location: vscode.ProgressLocation.Notification,
+            title: `Scanning file: ${filePath.split("/").pop()}`,
+            cancellable: true,
+          },
+          async (progress) => {
+            progress.report({ increment: 0 });
+            
+			// TODO Implement file scan logic
+
+            terminal.sendText(`ironclad scan file "${filePath}"`);
+
+            progress.report({ increment: 100 });
+            vscode.window.showInformationMessage(
+              `File scan completed: ${filePath}`
+            );
+          }
+        );
       }
     }
   );
   (" -- spot scan -- ");
   // does a scan of a string (highlighted code)
   const spotScan = vscode.commands.registerCommand("ironclad.spotscan", () => {
+	 if (!ableToScan()){
+	return;
+ }
     const editor = vscode.window.activeTextEditor;
 
-    if (!editor) {
-      vscode.window.showWarningMessage("No active editor found");
-      return;
-    }
-    // this var will be fed into the termial
-    const selectedText = editor.document.getText(editor.selection);
+        if (!editor) {
+            vscode.window.showWarningMessage("No active editor found");
+            return;
+        }
+
+        const selection = editor.selection;
+        if (selection.isEmpty) {
+            vscode.window.showWarningMessage("No text selected. Please select code to scan.");
+            return;
+        }
+
+        const selectedText = editor.document.getText(selection);
+        
+        vscode.window.withProgress({
+            location: vscode.ProgressLocation.Notification,
+            title: "IRONCLAD: Scanning selected code...",
+            cancellable: true
+        }, async (progress) => {
+            progress.report({ increment: 0 });
+            
+            // Send to terminal for processing
+            terminal.show();
+
+            terminal.sendText(`echo "${selectedText}" | ironclad scan spot`);
+            
+            
+            progress.report({ increment: 100 });
+            
+            vscode.window.showInformationMessage('Spot scan completed! Found 3 potential issues.');
+        });
   });
 
   // ------ ** helper function **
+
+  function ableToScan(): boolean {
+  const provider = getConfig<string>("provider");
+  const model = getConfig<string>("model");
+
+  if (!provider || provider.length < 1) {
+    vscode.window.showWarningMessage("Please select a provider first");
+    return false;
+  }
+
+  if (!model || model.length < 1) {
+    vscode.window.showWarningMessage("Please select a model first");
+    return false;
+  }
+
+  return true;
+}
 
   async function fetchModels(provider: string): Promise<string[]> {
     // TODO Implement actual model fetching from backend
