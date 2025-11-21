@@ -217,6 +217,8 @@ export function activate(context: vscode.ExtensionContext) {
 
             // TODO: full scan logic
 
+			
+
             vscode.window.showInformationMessage(
               "Full project scan completed!"
             );
@@ -321,7 +323,7 @@ export function activate(context: vscode.ExtensionContext) {
         });
   });
 
-  // ------ ** helper function **
+  //*------ ** helper function **
 
   function ableToScan(): boolean {
   const provider = getConfig<string>("provider");
@@ -374,7 +376,120 @@ export function activate(context: vscode.ExtensionContext) {
     endpoint,
     setapikey
   );
+  
+
+ 
+  context.subscriptions.push(
+    vscode.window.createTreeView('ironclad.commandsView', {
+      treeDataProvider: new CommandsTreeProvider(context)//context
+    })
+  );
+
+ 
+  const targetDir = '/ironclad'; 
+  context.subscriptions.push(
+    vscode.window.createTreeView('ironclad.filesView', {
+      treeDataProvider: new FilesTreeProvider(targetDir)//
+    })
+  );
 }
+
+
+class CommandsTreeProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
+  
+  constructor(private context: vscode.ExtensionContext) {}
+
+  getTreeItem(element: vscode.TreeItem): vscode.TreeItem {
+    return element;
+  }
+
+  async getChildren(element?: vscode.TreeItem): Promise<vscode.TreeItem[]> {
+   
+    if (element) {
+      return [];
+    }
+
+  
+    const allCommands = await vscode.commands.getCommands(true); 
+
+   
+    const myExtensionCommands = allCommands.filter(cmd => 
+      cmd.startsWith('ironclad.')
+    );
+    
+    
+    return myExtensionCommands.map(commandId => {
+      const item = new vscode.TreeItem(commandId);
+      item.iconPath = new vscode.ThemeIcon('symbol-event'); 
+     
+      item.command = {
+        command: commandId,
+        title: `Run ${commandId}`
+      };
+      return item;
+    });
+  }
+}
+
+
+class FilesTreeProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
+  
+  constructor(private targetDirName: string) {}
+
+  getTreeItem(element: vscode.TreeItem): vscode.TreeItem {
+    return element;
+  }
+
+  async getChildren(element?: vscode.TreeItem): Promise<vscode.TreeItem[]> {
+    
+    if (element) {
+      return [];
+    }
+
+    
+    const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+    if (!workspaceFolder) {
+      return []; // No folder open
+    }
+
+    
+    const targetDirUri = vscode.Uri.joinPath(workspaceFolder.uri, this.targetDirName);
+
+    try {
+      
+      const entries = await vscode.workspace.fs.readDirectory(targetDirUri);
+
+      
+      const fileItems: vscode.TreeItem[] = [];
+      for (const [name, type] of entries) {
+        if (type === vscode.FileType.File) {
+          const item = new vscode.TreeItem(name);
+          
+          
+          item.collapsibleState = vscode.TreeItemCollapsibleState.None;
+
+          
+          const fileUri = vscode.Uri.joinPath(targetDirUri, name);
+          item.command = {
+            command: 'vscode.open',
+            title: 'Open File',
+            arguments: [fileUri]
+          };
+          
+          fileItems.push(item);
+        }
+      }
+      return fileItems;
+      
+    } catch (error) {
+      
+      vscode.window.showErrorMessage(`Directory not found: ${this.targetDirName}`);
+	  vscode.window.showErrorMessage(`run any ironcladscan in order to see results`);
+      return [];
+    }
+  }
+}
+
 
 // This method is called when your extension is deactivated
 export function deactivate() {}

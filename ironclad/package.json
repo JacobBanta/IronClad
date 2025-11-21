@@ -9,9 +9,7 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [
-    
-],
+  "activationEvents": [],
   "main": "./out/extension.js",
   "contributes": {
     "viewsContainers": {
@@ -24,26 +22,24 @@
       ]
     },
     "views": {
-     "ironclad-activitybar": [
-         {
-          "id": "ironclad-vulnerabilities",
-          "name": "Vulnerabilities",
-          "type": "tree"
+      "ironclad-activitybar": [
+        
+        {
+          "id": "ironclad.commandsView",
+          "name": "commands",
+          "type": "tree",
+          "when": "true"
         },
         {
-          "id": "ironclad-scans",
-          "name": "Last Scan Results",
-          "type": "tree"
-        },
-        {
-          "id": "ironclad-tools",
-          "name": "Security Tools",
-          "type": "tree"
+          "id": "ironclad.filesView",
+          "name": "scan results",
+          "type": "tree",
+          "when": "true"
         }
       ]
     },
     "commands": [
-       {
+      {
         "command": "ironclad.selectProvider",
         "title": "Select AI Provider",
         "category": "IRONCLAD - Configuration",
@@ -139,7 +135,7 @@
           "group": "ironclad"
         }
       ],
-      "view/item/context": [
+      "explorer/context": [
         {
           "command": "ironclad.scanfile",
           "when": "true",
@@ -166,7 +162,11 @@
       "properties": {
         "ironclad.provider": {
           "type": "string",
-          "enum": ["ollama", "openrouter", "vscode"],
+          "enum": [
+            "ollama",
+            "openrouter",
+            "vscode"
+          ],
           "default": "",
           "description": "AI Provider for vulnerability analysis"
         },
@@ -188,7 +188,6 @@
       }
     }
   },
-  
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
