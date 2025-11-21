@@ -1,5 +1,6 @@
 // The module 'vscode' contains the VS Code extensibility API
 // Import the module and reference it with the alias vscode in your code below
+import { type } from "os";
 import * as vscode from "vscode";
 
 // This method is called when your extension is activated
@@ -154,13 +155,22 @@ export function activate(context: vscode.ExtensionContext) {
     "ironclad.setapikey",
     async () => {
       const apikey: string | undefined = await vscode.window.showInputBox({
-        placeHolder: "input api key",
+        placeHolder: "input api key or type 'remove' to delete api key ",
         prompt: "input api key",
       });
 
+      if (apikey === "remove") {
+        await context.secrets.delete("myExtensionApiKey");
+        vscode.window.showInformationMessage("api key removed successfully");
+        return;
+      }
       if (apikey === undefined) {
         // ^ this is if the user cancelled
-        if (getConfig("provider") === "openrouter") {
+        if (
+          getConfig("provider") === "openrouter" &&
+          (await context.secrets.get("myExtensionApiKey")) === undefined
+        ) {
+          vscode.window.showErrorMessage("openrouter requires a api key key ");
         }
       } else {
         await context.secrets.store("myExtensionApiKey", apikey);
