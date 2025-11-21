@@ -65,10 +65,9 @@ pub fn main() !void {
 
         const endpoint = res.args.endpoint orelse "http://127.0.0.1:11434";
 
-        var response_writer = std.Io.Writer.Allocating.init(allocator);
-        defer response_writer.deinit();
-
         if (res.args.@"list-models" != 0) {
+            var response_writer = std.Io.Writer.Allocating.init(allocator);
+            defer response_writer.deinit();
             var url_buffer: [64]u8 = undefined;
             const url = try std.fmt.bufPrint(&url_buffer, "{s}/api/tags", .{endpoint});
 
@@ -101,33 +100,281 @@ pub fn main() !void {
             }
         }
         if (res.args.model != null) {
-            var url_buffer: [64]u8 = undefined;
-            const url = try std.fmt.bufPrint(&url_buffer, "{s}/api/chat", .{endpoint});
+            var output = try process(res, allocator, &client);
+            defer output.deinit();
+            const msg = try std.json.parseFromSlice(struct { message: struct { content: []const u8 } }, allocator, output.written(), .{ .ignore_unknown_fields = true });
+            defer msg.deinit();
 
-            var payload = std.Io.Writer.Allocating.init(allocator);
-            defer payload.deinit();
-            switch (res.args.mode orelse .file) {
-                .file => {
-                    const system = "You are a cat. Only respond as you would if you were a cat. As you are a cat, you obviously dont speak English, so don't respond using English. You may use onomatopoeia, as well as any other actions. JUST NO SPOKEN ENGLISH. You dont necessarily need to answer the user's question, as long as you act like a cat.";
-                    const user = "Why is the sky blue?";
-                    try payload.writer.print("{{ \"model\": \"{s}\", \"messages\": [{{ \"role\": \"system\", \"content\": \"{s}\" }}, {{ \"role\": \"user\", \"content\": \"{s}\" }}], \"stream\": false }}", .{ res.args.model.?, system, user });
-                },
-                else => {},
-            }
-
-            const fetch_result = client.fetch(.{
-                .location = .{ .url = url },
-                .response_writer = &response_writer.writer,
-                .payload = payload.written(),
-            }) catch |e| {
-                std.debug.print("{any}\n", .{e});
-                std.process.exit(1);
-            };
-            _ = fetch_result;
-            try out.print("{s}\n", .{response_writer.written()});
+            _ = try out.writeAll(msg.value.message.content);
             try out.flush();
             return;
         }
     }
     std.debug.print("Unsupported usage.\nUse -h to display help message.\n", .{});
+}
+
+pub fn process(res: anytype, allocator: std.mem.Allocator, client: *std.http.Client) !std.Io.Writer.Allocating {
+    var response_writer = std.Io.Writer.Allocating.init(allocator);
+    defer response_writer.deinit();
+    var user2 = std.Io.Writer.Allocating.init(allocator);
+    defer user2.deinit();
+    var final_response_writer = std.Io.Writer.Allocating.init(allocator);
+    const endpoint = res.args.endpoint orelse "http://127.0.0.1:11434";
+    var url_buffer: [64]u8 = undefined;
+    const url = try std.fmt.bufPrint(&url_buffer, "{s}/api/chat", .{endpoint});
+
+    var payload = std.Io.Writer.Allocating.init(allocator);
+    defer payload.deinit();
+    switch (res.args.mode orelse .file) {
+        .file => {
+            const system = try escapeString(allocator, //{{{
+                \\You are an expert security analyst specializing in static code analysis. Your task is to analyze provided source code files and identify potential security vulnerabilities.
+                \\
+                \\ANALYSIS APPROACH:
+                \\- Examine ONLY the code explicitly provided to you
+                \\- Standard library functions are assumed safe unless you have a specific CVE/GHSA identifier
+                \\- "No vulnerabilities detected" is the NORMAL and EXPECTED outcome for most code
+                \\- Only report vulnerabilities you can prove with direct code evidence
+                \\
+                \\SEVERITY CLASSIFICATION:
+                \\- CRITICAL: Remote code execution, authentication bypass, or severe memory corruption with a complete exploitation chain visible in the code
+                \\- HIGH: Denial of service, privilege escalation, or significant data manipulation
+                \\- MEDIUM: Information disclosure or partial data manipulation requiring complex attack
+                \\- LOW: Minor issues, best practice violations, minimal impact
+                \\
+                \\SPECIFIC RULES FOR CRITICAL:
+                \\- CRITICAL requires overwhelming evidence and a complete exploitation path
+                \\- Integer/float overflow is ONLY CRITICAL if it DIRECTLY causes memory corruption (not just panics or errors)
+                \\- When uncertain between CRITICAL and HIGH, always choose HIGH
+                \\
+                \\OUTPUT FORMAT:
+                \\For each vulnerability found, provide:
+                \\1. Severity level
+                \\2. Vulnerability type
+                \\3. Exact location
+                \\4. Vulnerable code snippet
+                \\5. Description based on code evidence
+                \\6. Potential impact
+                \\7. Recommended fix
+                \\
+                \\CRITICAL FLAGGING:
+                \\- Include `CRITICAL` at the start only if you found critical vulnerabilities
+                \\- If no critical vulnerabilities exist, do NOT use the word `CRITICAL` anywhere
+                \\
+                \\BREVITY RULE:
+                \\- If you find NO vulnerabilities, respond with exactly: "No vulnerabilities detected."
+                \\- Do NOT add any additional text, explanations, or advice
+                \\- This is the expected and correct response for safe code
+                \\
+                \\BEFORE REPORTING ANY VULNERABILITY:
+                \\- Verify it's not a standard library function (these are safe)
+                \\- Verify you have direct code evidence for every claim
+                \\- Verify you're not speculating about data flow or runtime behavior
+                \\- When in doubt, classify as LOW/MEDIUM, not CRITICAL
+                \\
+                \\Focus on accuracy over quantity. Most code has no vulnerabilities, and that's normal.
+            ); //}}}
+            defer allocator.free(system);
+            const user = try processFile(res.args.file orelse return error.NoFileGiven, allocator);
+            defer allocator.free(user);
+
+            try payload.writer.print("{{ \"model\": \"{s}\", \"messages\": [{{ \"role\": \"system\", \"content\": \"{s}\" }}, {{ \"role\": \"user\", \"content\": \"{s}\" }}], \"temperature\": 0.1, \"stream\": false }}", .{ res.args.model.?, system, user });
+        },
+        else => {},
+    }
+    try payload.writer.flush();
+
+    for (0..10) |i| {
+        try user2.writer.print("\\n\\nrun {d}:\\n", .{i + 1});
+        const fetch_result = client.fetch(.{
+            .location = .{ .url = url },
+            .response_writer = &response_writer.writer,
+            .payload = payload.written(),
+        }) catch |e| {
+            std.debug.print("{any}\n", .{e});
+            std.process.exit(1);
+        };
+        if (@intFromEnum(fetch_result.status) != 200) {
+            std.debug.print("error: non 200 status code: {d}: {?s}\n", .{ @intFromEnum(fetch_result.status), fetch_result.status.phrase() });
+            std.process.exit(1);
+        }
+        const msg = try std.json.parseFromSlice(struct { message: struct { content: []const u8 } }, allocator, response_writer.written(), .{ .ignore_unknown_fields = true });
+        defer msg.deinit();
+        const string = try escapeString(allocator, msg.value.message.content);
+        defer allocator.free(string);
+        _ = try user2.writer.write(string);
+        response_writer.clearRetainingCapacity();
+    }
+    var payload2 = std.Io.Writer.Allocating.init(allocator);
+    defer payload2.deinit();
+    switch (res.args.mode orelse .file) {
+        .file => {
+            const system = try escapeString(allocator, //{{{
+                \\You are an expert security analyst specializing in aggregating and correlating static code analysis results from multiple scanning runs. Your task is to analyze multiple vulnerability reports and produce a consolidated, accurate summary.
+                \\
+                \\AGGREGATION PRINCIPLES:
+                \\- **Consensus matters**: Vulnerabilities reported consistently across multiple runs are more likely to be real
+                \\- **Solo findings are suspicious**: A vulnerability found in only 1 of 10 runs is likely a false positive
+                \\- **Standard library functions are safe**: If any report claims a stdlib vulnerability, treat it as a false positive
+                \\- **CRITICAL findings require overwhelming evidence**: Only flag CRITICAL if multiple runs independently confirm it
+                \\
+                \\ANALYSIS PROCESS:
+                \\1. Count how many runs reported "No vulnerabilities detected"
+                \\2. Extract all vulnerability findings from runs that reported issues
+                \\3. Group findings by: vulnerability type, location, and code snippet
+                \\4. For each distinct finding, note how many runs reported it
+                \\5. Apply false positive heuristics (see below)
+                \\6. Consolidate findings and assign confidence levels
+                \\
+                \\FALSE POSITIVE HEURISTICS:
+                \\- **Single-run findings**: Automatically suspect unless extremely well-documented
+                \\- **Stdlib claims**: Always false positives (Go/Rust/Zig stdlibs are memory-safe)
+                \\- **Inconsistent details**: Same location but different descriptions = likely hallucination
+                \\- **Severity escalation**: "Error" → "RCE" without clear mechanism = downgrade
+                \\- **Missing evidence**: No code snippet or vague location = discard
+                \\
+                \\CONFIDENCE LEVELS:
+                \\- **HIGH**: 3+ runs report identical vulnerability with same location and code
+                \\- **MEDIUM**: 2 runs report similar vulnerability with consistent details
+                \\- **LOW**: Single run reports vulnerability (treat as probable false positive)
+                \\- **FALSE POSITIVE**: Stdlib claims or contradictory reports
+                \\
+                \\OUTPUT FORMAT:
+                \\```
+                \\AGGREGATION SUMMARY
+                \\Total runs analyzed: [N]
+                \\Runs with no findings: [N]
+                \\Runs with findings: [N]
+                \\
+                \\CONSOLIDATED FINDINGS:
+                \\[If none]: No vulnerabilities detected across all runs.
+                \\
+                \\[If findings exist, for each]:
+                \\1. Vulnerability: [Type]
+                \\   Severity: [LOW/MEDIUM/HIGH/CRITICAL]
+                \\   Location: [File:Line]
+                \\   Code: [Snippet]
+                \\   Confidence: [HIGH/MEDIUM/LOW]
+                \\   Reported in: [X of N runs]
+                \\   Description: [Consolidated description from reports]
+                \\   Recommended fix: [Consolidated fix]
+                \\
+                \\CRITICAL SUMMARY:
+                \\[If any CRITICAL findings with HIGH/MEDIUM confidence, list them]
+                \\[If no CRITICAL findings, state: "No CRITICAL vulnerabilities confirmed"]
+                \\
+                \\FALSE POSITIVES IDENTIFIED:
+                \\[List any findings you flagged as false positives with reasoning]
+                \\```
+                \\
+                \\CRITICAL FLAGGING RULES:
+                \\- Include `CRITICAL` at the start of your response ONLY if you have HIGH or MEDIUM confidence CRITICAL findings
+                \\- If no CRITICAL vulnerabilities are confirmed, do NOT use the word `CRITICAL` anywhere in your response
+                \\
+                \\EXAMPLE OUTPUT:
+                \\```
+                \\AGGREGATION SUMMARY
+                \\Total runs analyzed: 10
+                \\Runs with no findings: 9
+                \\Runs with findings: 1
+                \\
+                \\CONSOLIDATED FINDINGS:
+                \\No vulnerabilities detected across all runs.
+                \\
+                \\CRITICAL SUMMARY:
+                \\No CRITICAL vulnerabilities confirmed.
+                \\
+                \\FALSE POSITIVES IDENTIFIED:
+                \\- Claimed buffer overflow in strconv.ParseFloat (1 run) - Go stdlib is memory-safe, this is a false positive
+                \\```
+                \\
+                \\Focus on producing a conservative, accurate summary that prioritizes avoiding false positives over reporting questionable findings.
+            ); //}}}
+            defer allocator.free(system);
+
+            try payload2.writer.print("{{ \"model\": \"{s}\", \"messages\": [{{ \"role\": \"system\", \"content\": \"{s}\" }}, {{ \"role\": \"user\", \"content\": \"{s}\" }}], \"temperature\": 0.1, \"stream\": false }}", .{ res.args.model.?, system, user2.written() });
+        },
+        else => {},
+    }
+    try payload2.writer.flush();
+    const fetch_result = client.fetch(.{
+        .location = .{ .url = url },
+        .response_writer = &final_response_writer.writer,
+        .payload = payload2.written(),
+    }) catch |e| {
+        std.debug.print("{any}\n", .{e});
+        std.process.exit(1);
+    };
+    if (@intFromEnum(fetch_result.status) != 200) {
+        std.debug.print("error: non 200 status code: {d}: {?s}\n", .{ @intFromEnum(fetch_result.status), fetch_result.status.phrase() });
+        return final_response_writer;
+        //std.process.exit(1);
+    }
+    return final_response_writer;
+}
+
+pub fn processFile(filename: []const u8, allocator: std.mem.Allocator) ![]const u8 {
+    const cwd = std.fs.cwd();
+    const file = try cwd.openFile(filename, .{});
+    defer file.close();
+    var readBuffer: [64]u8 = undefined;
+    var fileReader = file.reader(&readBuffer);
+    var reader = fileReader.interface.adaptToOldInterface();
+    const size = try fileReader.getSize();
+    const buf = try reader.readAllAlloc(allocator, size);
+    defer allocator.free(buf);
+    const fileContents = try escapeString(allocator, buf);
+    defer allocator.free(fileContents);
+    return try std.mem.join(allocator, "", &.{ "filename: `", filename, "`. contents: \\n", fileContents });
+}
+
+/// Escapes special characters: \\, \", \n, \r, \t
+pub fn escapeString(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
+    var len: usize = 0;
+    for (input) |c| {
+        switch (c) {
+            '\\', '"', '\n', '\r', '\t' => len += 2,
+            else => len += 1,
+        }
+    }
+
+    var result = try allocator.alloc(u8, len);
+    errdefer allocator.free(result);
+
+    var i: usize = 0;
+    for (input) |c| {
+        switch (c) {
+            '\\' => {
+                result[i] = '\\';
+                result[i + 1] = '\\';
+                i += 2;
+            },
+            '"' => {
+                result[i] = '\\';
+                result[i + 1] = '"';
+                i += 2;
+            },
+            '\n' => {
+                result[i] = '\\';
+                result[i + 1] = 'n';
+                i += 2;
+            },
+            '\r' => {
+                result[i] = '\\';
+                result[i + 1] = 'r';
+                i += 2;
+            },
+            '\t' => {
+                result[i] = '\\';
+                result[i + 1] = 't';
+                i += 2;
+            },
+            else => {
+                result[i] = c;
+                i += 1;
+            },
+        }
+    }
+
+    return result;
 }
