@@ -1,6 +1,7 @@
 const clap = @import("clap");
 const std = @import("std");
 const filter = @import("filter.zig");
+const mvzr = @import("mvzr");
 
 pub fn main() !void {
     var gpa = std.heap.DebugAllocator(.{}){};
@@ -119,7 +120,7 @@ pub fn main() !void {
                     return;
                 },
                 .full => {
-                    var valid_files = try filter.findValidFiles(allocator, if (res.positionals.len > 1) res.positionals[0] else ".");
+                    var valid_files = try filter.findValidFiles(allocator, res.positionals[0] orelse ".");
                     defer {
                         for (valid_files.items) |file| allocator.free(file);
                         valid_files.deinit(allocator);
@@ -128,19 +129,28 @@ pub fn main() !void {
                         _ = try out.writeAll("[ ");
                     }
 
+                    const SlimmedDownRegex = mvzr.SizedRegex(10000, 1000);
+
+                    var code_regex = SlimmedDownRegex.compile(
+                        // thank you claude
+                        \\^.+\.(c|h|cpp|cc|cxx|hpp|hxx|h\+\+|py|go|rs|zig|js|ts|jsx|tsx|mjs|mts|java|cs|rb|php|swift|kt|kts|scala|hs|lhs|clj|cljs|cljc|ex|exs|erl|r|pl|pm|lua|sh|bash|ps1|psd1|psm1|groovy|gradle|jl|dart|vue|svelte|vim|asm|s|m|mm|pas|pp|ada|ads|adb|cob|cbl|cobol|f|f90|f95|f03|for|lisp|lsp|cl|scm|ss|sql|pls|fish|tcl|awk|sed|md|markdown|txt|rst|tex|asciidoc|adoc|json|yaml|yml|toml|xml|csv|tsv|proto|graphql|lock)|(go\.mod|go\.sum|build\.zig\.zon|Cargo\.(toml|lock)|package(-lock)?\.json|yarn\.lock|pnpm-lock\.yaml|Gemfile(\.lock)?|requirements\.txt|setup\.(py|cfg)|pyproject\.toml|poetry\.lock|Makefile|GNUmakefile|CMakeLists\.txt|build\.gradle|settings\.gradle|pom\.xml|tsconfig\.json|Dockerfile|docker-compose\.(ya?ml)|\.env(\..+)?|Procfile|Rakefile|Cakefile|Taskfile|Justfile|Fastfile|Guardfile|Vagrantfile|Berksfile|SConstruct|SConscript|Jenkinsfile|\.gitignore|\.gitattributes|\.editorconfig|\.npmrc|\.htaccess|nginx\.conf|\.bashrc|\.bash_profile|\.zshrc|\.profile|\.vimrc|\.tmux\.conf|init\.(vim|lua)|\.eslintrc(\.(json|js|ya?ml))?|\.prettierrc(\.(json|js|ya?ml))?|\.gitlab-ci\.(ya?ml)|\.github\/workflows\/.*\.(ya?ml)|\.circleci/config\.(ya?ml))$
+                    ).?;
+
                     for (valid_files.items, 0..) |file, i| {
-                        var output = try process(res, allocator, &client, file);
-                        defer output.deinit();
-                        const msg = try std.json.parseFromSlice(struct { message: struct { content: []const u8 } }, allocator, output.written(), .{ .ignore_unknown_fields = true });
-                        defer msg.deinit();
-                        if (res.args.json != 0) {
-                            const escaped = try escapeString(allocator, msg.value.message.content);
-                            defer allocator.free(escaped);
-                            try out.print("{{ \"file\": \"{s}\", \"summary\": \"{s}\" }}", .{ res.args.file.?, escaped });
-                            if (i != valid_files.items.len - 1)
-                                _ = try out.writeAll(", ");
-                        } else {
-                            _ = try out.writeAll(msg.value.message.content);
+                        if (code_regex.isMatch(file)) {
+                            var output = try process(res, allocator, &client, file);
+                            defer output.deinit();
+                            const msg = try std.json.parseFromSlice(struct { message: struct { content: []const u8 } }, allocator, output.written(), .{ .ignore_unknown_fields = true });
+                            defer msg.deinit();
+                            if (res.args.json != 0) {
+                                const escaped = try escapeString(allocator, msg.value.message.content);
+                                defer allocator.free(escaped);
+                                try out.print("{{ \"file\": \"{s}\", \"summary\": \"{s}\" }}", .{ file, escaped });
+                                if (i != valid_files.items.len - 1)
+                                    _ = try out.writeAll(", ");
+                            } else {
+                                _ = try out.writeAll(msg.value.message.content);
+                            }
                         }
                     }
                     if (res.args.json != 0) {
