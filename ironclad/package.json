@@ -43,16 +43,142 @@
       ]
     },
     "commands": [
-      {
-        "command": "ironclad.helloWorld",
-        "title": "Hello World"
+       {
+        "command": "ironclad.selectProvider",
+        "title": "Select AI Provider",
+        "category": "IRONCLAD - Configuration",
+        "icon": "$(server)"
       },
       {
-        "command": "ironclad.selectProvider",
-        "title": "Select Provider"
+        "command": "ironclad.selectModel",
+        "title": "Select AI Model",
+        "category": "IRONCLAD - Configuration",
+        "icon": "$(circuit-board)"
+      },
+      {
+        "command": "ironclad.OllamaEndpoint",
+        "title": "Set Ollama Endpoint",
+        "category": "IRONCLAD - Configuration",
+        "icon": "$(link)"
+      },
+      {
+        "command": "ironclad.setMaxTokens",
+        "title": "Set Max Tokens",
+        "category": "IRONCLAD - Configuration",
+        "icon": "$(symbol-number)"
+      },
+      {
+        "command": "ironclad.fullscan",
+        "title": "Full Project Scan",
+        "category": "IRONCLAD - Scanning",
+        "icon": "$(search)"
+      },
+      {
+        "command": "ironclad.scanfile",
+        "title": "Scan Single File",
+        "category": "IRONCLAD - Scanning",
+        "icon": "$(file)"
+      },
+      {
+        "command": "ironclad.spotscan",
+        "title": "Spot Scan Selected Code",
+        "category": "IRONCLAD - Scanning",
+        "icon": "$(selection)"
       }
-    ]
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "ironclad.selectProvider",
+          "when": "true"
+        },
+        {
+          "command": "ironclad.selectModel",
+          "when": "true"
+        },
+        {
+          "command": "ironclad.OllamaEndpoint",
+          "when": "true"
+        },
+        {
+          "command": "ironclad.setMaxTokens",
+          "when": "true"
+        },
+        {
+          "command": "ironclad.fullscan",
+          "when": "true"
+        },
+        {
+          "command": "ironclad.scanfile",
+          "when": "true"
+        },
+        {
+          "command": "ironclad.spotscan",
+          "when": "editorHasSelection"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "ironclad.spotscan",
+          "when": "editorHasSelection",
+          "group": "ironclad"
+        },
+        {
+          "command": "ironclad.scanfile",
+          "when": "resourceScheme == file",
+          "group": "ironclad"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "ironclad.scanfile",
+          "when": "true",
+          "group": "ironclad"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "ironclad.spotscan",
+        "key": "ctrl+shift+i",
+        "mac": "cmd+shift+i",
+        "when": "editorTextFocus && editorHasSelection"
+      },
+      {
+        "command": "ironclad.scanfile",
+        "key": "ctrl+shift+i",
+        "mac": "cmd+shift+i",
+        "when": "resourceScheme == file"
+      }
+    ],
+    "configuration": {
+      "title": "IRONCLAD",
+      "properties": {
+        "ironclad.provider": {
+          "type": "string",
+          "enum": ["ollama", "openrouter", "vscode"],
+          "default": "",
+          "description": "AI Provider for vulnerability analysis"
+        },
+        "ironclad.model": {
+          "type": "string",
+          "default": "",
+          "description": "AI Model to use for scanning"
+        },
+        "ironclad.ollamaEndpoint": {
+          "type": "string",
+          "default": "",
+          "description": "Ollama API endpoint"
+        },
+        "ironclad.maxTokens": {
+          "type": "number",
+          "default": null,
+          "description": "Maximum tokens per AI request"
+        }
+      }
+    }
   },
+  
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
