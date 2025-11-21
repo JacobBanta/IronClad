@@ -12,6 +12,8 @@ export function activate(context: vscode.ExtensionContext) {
 
 
   (" ------------------- config --------------- ");
+
+
  
   //make only allow user to select from the three options ollama openrouter vscode
   // avalable in menu and also through the command pallet
@@ -25,10 +27,10 @@ export function activate(context: vscode.ExtensionContext) {
             });
 
             if (selected) {
-                await updateConfig('ironclad.provider', selected);
+                await updateConfig('provider', selected);
                 vscode.window.showInformationMessage(`AI Provider set to: ${selected}`);
             } else {
-                const currentProvider = getConfig('ironclad.provider');
+                const currentProvider = getConfig('provider');
                 if (currentProvider) {
                     vscode.window.showInformationMessage(`Current provider: ${currentProvider}`);
                 } else {
@@ -44,16 +46,37 @@ export function activate(context: vscode.ExtensionContext) {
   const model = vscode.commands.registerCommand(
     "ironclad.selectModel",
     async () => {
-      // if there are no models error out and request a provider to be chosen
-      const models = [""]; // this will be a list gotten from the back end
-      const selected = await vscode.window.showQuickPick(models);
+      const currentProvider = getConfig('provider');
+            if (!currentProvider) {
+                vscode.window.showWarningMessage('Please select a provider first using "Select AI Provider"');
+				vscode.commands.executeCommand("ironclad.selectProvider");
+				vscode.commands.executeCommand("ironclad.selectModel");
+                return;
+            }
 
-      if (selected) {
-        // a function with logic for selecting models will be used here
-      } else {
-		// logic for if there a model in the config vs not
-      }
-    }
+            // TODO: Fetch models from backend based on provider
+            const models = await fetchModels(currentProvider);
+            
+            if (models.length === 0) {
+                vscode.window.showWarningMessage(`No models available for ${currentProvider}. Please check your configuration.`);
+                return;
+            }
+
+            const selected = await vscode.window.showQuickPick(models, {
+                placeHolder: `Select model for ${currentProvider}`,
+                title: "AI Model Selection"
+            });
+
+            if (selected) {
+                await updateConfig('model', selected);
+                vscode.window.showInformationMessage(`AI Model set to: ${selected}`);
+            } else {
+                const currentModel = getConfig('model');
+                if (currentModel) {
+                    vscode.window.showInformationMessage(`Current model: ${currentModel}`);
+                }
+            }
+		}
   );
 
   //specify an endpoint for ollama ai model
