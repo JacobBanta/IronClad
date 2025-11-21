@@ -84,12 +84,22 @@
         "title": "Spot Scan Selected Code",
         "category": "IRONCLAD - Scanning",
         "icon": "$(selection)"
+      },
+      {
+        "command": "ironclad.setapikey",
+        "title": "Set API key",
+        "category": "IRONCLAD - Configuration",
+        "icon": "$(lock)"
       }
     ],
     "menus": {
       "commandPalette": [
         {
           "command": "ironclad.selectProvider",
+          "when": "true"
+        },
+        {
+          "command": "ironclad.setapikey",
           "when": "true"
         },
         {

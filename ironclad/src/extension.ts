@@ -2,123 +2,172 @@
 // Import the module and reference it with the alias vscode in your code below
 import * as vscode from "vscode";
 
-
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
-
-
   const terminal = vscode.window.createTerminal("ironcladTerminal");
-
 
   (" ------------------- config --------------- ");
 
-
- 
-  //make only allow user to select from the three options ollama openrouter vscode
-  // avalable in menu and also through the command pallet
+  // ^ avalable in menu and also through the command pallet
   const provider = vscode.commands.registerCommand(
     "ironclad.selectProvider",
     async () => {
       const providers = ["ollama", "openrouter", "vscode"];
-            const selected = await vscode.window.showQuickPick(providers, {
-                placeHolder: "Select AI provider for vulnerability analysis",
-                title: "AI Provider Selection"
-            });
+      const selected = await vscode.window.showQuickPick(providers, {
+        placeHolder: "Select AI provider for vulnerability analysis",
+        title: "AI Provider Selection",
+      });
 
-            if (selected) {
-                await updateConfig('provider', selected);
-                vscode.window.showInformationMessage(`AI Provider set to: ${selected}`);
-            } else {
-                const currentProvider = getConfig('provider');
-                if (currentProvider) {
-                    vscode.window.showInformationMessage(`Current provider: ${currentProvider}`);
-                } else {
-                    vscode.window.showWarningMessage('No provider selected. Please select a provider.');
-                }
-            }
+      if (selected) {
+        await updateConfig("provider", selected);
+        vscode.window.showInformationMessage(`AI Provider set to: ${selected}`);
+      } else {
+        const currentProvider = getConfig("provider");
+        if (currentProvider) {
+          vscode.window.showInformationMessage(
+            `Current provider: ${currentProvider}`
+          );
+        } else {
+          vscode.window.showWarningMessage(
+            "No provider selected. Please select a provider."
+          );
         }
+      }
+    }
   );
 
-  // specify a AI model to be used from the provider
-  // make the only options the list of avalable models
-  // avalable in menu and also through the command pallet
+  //  ^ avalable in menu and also through the command pallet
   const model = vscode.commands.registerCommand(
     "ironclad.selectModel",
     async () => {
-      const currentProvider = getConfig('provider');
-            if (!currentProvider) {
-                vscode.window.showWarningMessage('Please select a provider first using "Select AI Provider"');
-				vscode.commands.executeCommand("ironclad.selectProvider");
-				vscode.commands.executeCommand("ironclad.selectModel");
-                return;
-            }
+      const currentProvider = getConfig<string>("provider");
+      if (!currentProvider) {
+        vscode.window.showWarningMessage(
+          'Please select a provider first using "Select AI Provider"'
+        );
+        vscode.commands.executeCommand("ironclad.selectProvider");
+        vscode.commands.executeCommand("ironclad.selectModel");
+        return;
+      }
 
-            // TODO: Fetch models from backend based on provider
-            const models = await fetchModels(currentProvider);
-            
-            if (models.length === 0) {
-                vscode.window.showWarningMessage(`No models available for ${currentProvider}. Please check your configuration.`);
-                return;
-            }
+      // TODO Fetch models from backend based on provider
+      const models = await fetchModels(currentProvider);
 
-            const selected = await vscode.window.showQuickPick(models, {
-                placeHolder: `Select model for ${currentProvider}`,
-                title: "AI Model Selection"
-            });
+      if (models.length === 0) {
+        vscode.window.showWarningMessage(
+          `No models available for ${currentProvider}. Please check your configuration.`
+        );
+        return;
+      }
 
-            if (selected) {
-                await updateConfig('model', selected);
-                vscode.window.showInformationMessage(`AI Model set to: ${selected}`);
-            } else {
-                const currentModel = getConfig('model');
-                if (currentModel) {
-                    vscode.window.showInformationMessage(`Current model: ${currentModel}`);
-                }
-            }
-		}
+      const selected = await vscode.window.showQuickPick(models, {
+        placeHolder: `Select model for ${currentProvider}`,
+        title: "AI Model Selection",
+      });
+
+      if (selected) {
+        await updateConfig("model", selected);
+        vscode.window.showInformationMessage(`AI Model set to: ${selected}`);
+      } else {
+        const currentModel = getConfig("model");
+        if (currentModel) {
+          vscode.window.showInformationMessage(
+            `Current model: ${currentModel}`
+          );
+        }
+      }
+    }
   );
 
-  //specify an endpoint for ollama ai model
-  // avalable in menu and also through the command pallet
+  // ^ specify an endpoint for ollama ai model
+  // ^ avalable in menu and also through the command pallet
   const endpoint = vscode.commands.registerCommand(
     "ironclad.OllamaEndpoint",
     async () => {
+      const currentEndpoint =
+        getConfig<string>("ollamaEndpoint") || "http://localhost:11434";
+
       const endpoint = await vscode.window.showInputBox({
-        placeHolder: "Enter ollama endpoint",
-        prompt: "Enter ollama endpoint",
+        value: currentEndpoint,
+        placeHolder: "Enter Ollama endpoint (e.g., http://localhost:11434)",
+        prompt: "Ollama API Endpoint",
+        validateInput: (value) => {
+          if (!value.startsWith("http://") && !value.startsWith("https://")) {
+            return "Endpoint must start with http:// or https://";
+          }
+          return null;
+        },
       });
 
       if (endpoint === undefined) {
-        // this is if the user cancelled
-		// logic for if there a endpoint in the config for ollama vs not
-
+        // & User cancelled - show current endpoint
+        vscode.window.showInformationMessage(
+          `Current Ollama endpoint: ${currentEndpoint}`
+        );
       } else {
-        // set the ollama endpoint with this
+        await updateConfig("ollamaEndpoint", endpoint);
+        vscode.window.showInformationMessage(
+          `Ollama endpoint set to: ${endpoint}`
+        );
       }
     }
   );
 
-  // set The maximum tokens that a rquest is allowed to consume.
-  // avalable in menu and also through the command pallet
+  // ^ set The maximum tokens that a request is allowed to consume.
+  // ^ avalable in menu and also through the command pallet
   const tokens = vscode.commands.registerCommand(
     "ironclad.setMaxTokens",
     async () => {
-      const endpoint = await vscode.window.showInputBox({
-        placeHolder:
-          "set the maximum tokens that a request is allowed to consume",
-        prompt: "set the maximum tokens that a request is allowed to consume",
+      const currentTokens = getConfig("maxTokens") || 1000;
+
+      const tokens = await vscode.window.showInputBox({
+        value: currentTokens.toString(),
+        placeHolder: "Set maximum tokens per request",
+        prompt: "Maximum Tokens",
+        validateInput: (value) => {
+          const num = parseInt(value);
+          if (isNaN(num) || num <= 0) {
+            return "Please enter a positive number";
+          }
+          if (num > 100000) {
+            return "Maximum tokens cannot exceed 100,000";
+          }
+          return null;
+        },
       });
 
-      if (endpoint === undefined) {
-        // this is if the user cancelled
-		// logic for if there a token amount in the config for openrouter vs not
+      if (tokens === undefined) {
+        vscode.window.showInformationMessage(
+          `Current max tokens: ${currentTokens}`
+        );
       } else {
-        const endpointint = parseInt(endpoint);
+        const tokensInt = parseInt(tokens);
+        await updateConfig("maxTokens", tokensInt);
+        vscode.window.showInformationMessage(`Max tokens set to: ${tokensInt}`);
       }
     }
   );
 
+  // ^ set api token with vscode secret api
+  const setapikey = vscode.commands.registerCommand(
+    "ironclad.setapikey",
+    async () => {
+      const apikey: string | undefined = await vscode.window.showInputBox({
+        placeHolder: "input api key",
+        prompt: "input api key",
+      });
+
+      if (apikey === undefined) {
+        // ^ this is if the user cancelled
+        if (getConfig("provider") === "openrouter") {
+        }
+      } else {
+        await context.secrets.store("myExtensionApiKey", apikey);
+        vscode.window.showInformationMessage("api key stored successfully");
+      }
+    }
+  );
 
   (" ------------------- scanning functionality --------------- ");
 
@@ -127,10 +176,8 @@ export function activate(context: vscode.ExtensionContext) {
     // will scan the whole project including sub folders and such
   });
 
-
   ("diff                Do a scan over the git diffs."); // will be added later
   // when diff scan is selected make sure to ask for what commit to diff against
-
 
   ("file                Do a check on a file.");
   // when file scan is selected make sure to either ask for what file to scan(if done from side bar)
@@ -165,32 +212,42 @@ export function activate(context: vscode.ExtensionContext) {
     const selectedText = editor.document.getText(editor.selection);
   });
 
-
   // ------ ** helper function **
 
   async function fetchModels(provider: string): Promise<string[]> {
-        // TODO Implement actual model fetching from backend
-        switch (provider) {
-            case 'ollama':
-                return ['llama2', 'codellama', 'mistral'];
-            case 'openrouter':
-                return ['gpt-4', 'claude-2', 'llama-2-70b'];
-            case 'vscode':
-                return ['vscode-native'];
-            default:
-                return [];
-        }
+    // TODO Implement actual model fetching from backend
+    switch (provider) {
+      case "ollama":
+        return ["llama2", "codellama", "mistral"];
+      case "openrouter":
+        return ["gpt-4", "claude-2", "llama-2-70b"];
+      case "vscode":
+        return ["vscode-native"];
+      default:
+        return [];
     }
+  }
 
-  function getConfig<T>(key: string): T | undefined {
-        return vscode.workspace.getConfiguration('ironclad').get<T>(key);
-    }
+  function getConfig<Type>(key: string): Type | undefined {
+    return vscode.workspace.getConfiguration("ironclad").get<Type>(key);
+  }
 
-    async function updateConfig(key: string, value: any): Promise<void> {
-        await vscode.workspace.getConfiguration('ironclad').update(key, value, true);
-    }
+  async function updateConfig(key: string, value: any): Promise<void> {
+    await vscode.workspace
+      .getConfiguration("ironclad")
+      .update(key, value, true);
+  }
 
-  context.subscriptions.push(provider, model, spotScan, scanfile, fullscan, tokens,endpoint , );
+  context.subscriptions.push(
+    provider,
+    model,
+    spotScan,
+    scanfile,
+    fullscan,
+    tokens,
+    endpoint,
+    setapikey
+  );
 }
 
 // This method is called when your extension is deactivated
