@@ -4,7 +4,7 @@
   "description": "An elegant vulnerability checker for coding needs.",
   "version": "0.0.1",
   "engines": {
-    "vscode": "^1.106.1"
+    "vscode": "^1.1.1"
   },
   "categories": [
     "Other"
@@ -25,11 +25,20 @@
     },
     "views": {
      "ironclad-activitybar": [
+         {
+          "id": "ironclad-vulnerabilities",
+          "name": "Vulnerabilities",
+          "type": "tree"
+        },
         {
-          "type": "webview",
-          "id": "ironclad-sidebar",
-          "name": "Vulnerability Scanner",
-          "icon": "resources/ironclad.svg"
+          "id": "ironclad-scans",
+          "name": "Last Scan Results",
+          "type": "tree"
+        },
+        {
+          "id": "ironclad-tools",
+          "name": "Security Tools",
+          "type": "tree"
         }
       ]
     },

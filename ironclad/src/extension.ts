@@ -106,6 +106,12 @@ export function activate(context: vscode.ExtensionContext) {
   ("make the mode selection happen in the actual ui ");
   ("-M, --mode <MODE>             Specify operation mode. Defaults to diff.");
   ("full                Do a full code scan.");
+    const fullscan = vscode.commands.registerCommand(
+    "ironclad.fullscan",
+    () => {
+      // will scan the whole project including sub folders and such 
+    }
+  );
   ("diff                Do a scan over the git diffs.");// will be added later
   // when diff scan is selected make sure to ask for what commit to diff against
   ("file                Do a check on a file.");
@@ -115,18 +121,18 @@ export function activate(context: vscode.ExtensionContext) {
   
   // this will scan a file depending on if the user is using the editor or uses a command 
   const scanfile = vscode.commands.registerCommand(
-	"ironclad.",
+	"ironclad.scanfile",
 	async() => {
 
 		const fileLocation = await vscode.window.showInputBox({ 
-			placeHolder: 'what file ',
-			prompt:'set the maximum tokens that a request is allowed to consume',
+			placeHolder: 'what is the location of the folder you wish to scan',
+			prompt:'Write the location of the file you wish to scan',
 		});
 
-		if (endpoint === undefined) {
+		if (fileLocation === undefined) {
             // this is if the user cancelled
         } else {
-            const endpointint = parseInt(endpoint);
+            // use terminal do a file check
         }
 	}
   );
