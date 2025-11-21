@@ -14,11 +14,11 @@ pub fn main() !void {
         \\-p, --provider <PROVIDER>     Select between multiple providers. Defaults to ollama.
         \\          ollama
         \\          openrouter
-        \\          vscode
         \\-e, --endpoint <STRING>       If provider is Ollama, the endpoint may be specified. Defaults to local.
         \\-m, --model <STRING>          Specify a model to use.
         \\-l, --list-models             List out each model provided by the selected provider.
         \\-c, --config <FILE>           Specify the config file.
+        \\    --api-key <STRING>        If the provider is openrouter, an API Key should be provided.
         \\-o, --output <PATH>           Specify the output path.
         \\    --max-tokens <INTEGER>    The maximum tokens that a rquest is allowed to consume.
         \\-M, --mode <MODE>             Specify operation mode. Defaults to diff.
@@ -77,7 +77,9 @@ pub fn main() !void {
         const fetch_result = client.fetch(.{
             .location = .{ .uri = endpoint },
             .response_writer = &response_writer.writer,
-            .headers = .{ .authorization = .{ .override = "Bearer " ++ @embedFile("API.KEY") } },
+            .headers = .{ .authorization = .{
+                .override = "Bearer " ++ @embedFile("API.KEY"),
+            } },
         }) catch |e| {
             std.debug.print("{any}\n", .{e});
             std.process.exit(1);
@@ -127,81 +129,82 @@ pub fn main() !void {
             }
         }
     }
-    if ((res.args.provider orelse .ollama) == .ollama) {
-        if (res.args.model != null) {
-            switch (res.args.mode orelse .file) {
-                .file => {
-                    var output = try process(res, allocator, &client, res.args.file orelse return error.NoFileGiven);
-                    defer output.deinit();
-                    const msg = try std.json.parseFromSlice(struct { message: struct { content: []const u8 } }, allocator, output.written(), .{ .ignore_unknown_fields = true });
-                    defer msg.deinit();
+    if (res.args.model != null) {
+        switch (res.args.mode orelse .file) {
+            .file => {
+                var output = try process(res, allocator, &client, &endpoint, res.args.file orelse return error.NoFileGiven);
+                defer output.deinit();
+                const msg = try std.json.parseFromSlice(struct { message: struct { content: []const u8 } }, allocator, output.written(), .{ .ignore_unknown_fields = true });
+                defer msg.deinit();
 
-                    if (res.args.json != 0) {
-                        const escaped = try escapeString(allocator, msg.value.message.content);
-                        defer allocator.free(escaped);
-                        try out.print("[ {{ \"file\": \"{s}\", \"summary\": \"{s}\" }} ]", .{ res.args.file.?, escaped });
-                    } else {
-                        _ = try out.writeAll(msg.value.message.content);
-                    }
-                    try out.flush();
-                    return;
-                },
-                .full => {
-                    var valid_files = try filter.findValidFiles(allocator, res.positionals[0] orelse ".");
-                    defer {
-                        for (valid_files.items) |file| allocator.free(file);
-                        valid_files.deinit(allocator);
-                    }
-                    if (res.args.json != 0) {
-                        _ = try out.writeAll("[ ");
-                    }
+                if (res.args.json != 0) {
+                    const escaped = try escapeString(allocator, msg.value.message.content);
+                    defer allocator.free(escaped);
+                    try out.print("[ {{ \"file\": \"{s}\", \"summary\": \"{s}\" }} ]", .{ res.args.file.?, escaped });
+                } else {
+                    _ = try out.writeAll(msg.value.message.content);
+                }
+                try out.flush();
+                return;
+            },
+            .full => {
+                var valid_files = try filter.findValidFiles(allocator, res.positionals[0] orelse ".");
+                defer {
+                    for (valid_files.items) |file| allocator.free(file);
+                    valid_files.deinit(allocator);
+                }
+                if (res.args.json != 0) {
+                    _ = try out.writeAll("[ ");
+                }
 
-                    const SlimmedDownRegex = mvzr.SizedRegex(10000, 1000);
+                const SlimmedDownRegex = mvzr.SizedRegex(10000, 1000);
 
-                    var code_regex = SlimmedDownRegex.compile(
-                        // thank you claude
-                        \\^.+\.(c|h|cpp|cc|cxx|hpp|hxx|h\+\+|py|go|rs|zig|js|ts|jsx|tsx|mjs|mts|java|cs|rb|php|swift|kt|kts|scala|hs|lhs|clj|cljs|cljc|ex|exs|erl|r|pl|pm|lua|sh|bash|ps1|psd1|psm1|groovy|gradle|jl|dart|vue|svelte|vim|asm|s|m|mm|pas|pp|ada|ads|adb|cob|cbl|cobol|f|f90|f95|f03|for|lisp|lsp|cl|scm|ss|sql|pls|fish|tcl|awk|sed|md|markdown|txt|rst|tex|asciidoc|adoc|json|yaml|yml|toml|xml|csv|tsv|proto|graphql|lock)|(go\.mod|go\.sum|build\.zig\.zon|Cargo\.(toml|lock)|package(-lock)?\.json|yarn\.lock|pnpm-lock\.yaml|Gemfile(\.lock)?|requirements\.txt|setup\.(py|cfg)|pyproject\.toml|poetry\.lock|Makefile|GNUmakefile|CMakeLists\.txt|build\.gradle|settings\.gradle|pom\.xml|tsconfig\.json|Dockerfile|docker-compose\.(ya?ml)|\.env(\..+)?|Procfile|Rakefile|Cakefile|Taskfile|Justfile|Fastfile|Guardfile|Vagrantfile|Berksfile|SConstruct|SConscript|Jenkinsfile|\.gitignore|\.gitattributes|\.editorconfig|\.npmrc|\.htaccess|nginx\.conf|\.bashrc|\.bash_profile|\.zshrc|\.profile|\.vimrc|\.tmux\.conf|init\.(vim|lua)|\.eslintrc(\.(json|js|ya?ml))?|\.prettierrc(\.(json|js|ya?ml))?|\.gitlab-ci\.(ya?ml)|\.github\/workflows\/.*\.(ya?ml)|\.circleci/config\.(ya?ml))$
-                    ).?;
+                var code_regex = SlimmedDownRegex.compile(
+                    // thank you claude
+                    \\^.+\.(c|h|cpp|cc|cxx|hpp|hxx|h\+\+|py|go|rs|zig|js|ts|jsx|tsx|mjs|mts|java|cs|rb|php|swift|kt|kts|scala|hs|lhs|clj|cljs|cljc|ex|exs|erl|r|pl|pm|lua|sh|bash|ps1|psd1|psm1|groovy|gradle|jl|dart|vue|svelte|vim|asm|s|m|mm|pas|pp|ada|ads|adb|cob|cbl|cobol|f|f90|f95|f03|for|lisp|lsp|cl|scm|ss|sql|pls|fish|tcl|awk|sed|md|markdown|txt|rst|tex|asciidoc|adoc|json|yaml|yml|toml|xml|csv|tsv|proto|graphql|lock)|(go\.mod|go\.sum|build\.zig\.zon|Cargo\.(toml|lock)|package(-lock)?\.json|yarn\.lock|pnpm-lock\.yaml|Gemfile(\.lock)?|requirements\.txt|setup\.(py|cfg)|pyproject\.toml|poetry\.lock|Makefile|GNUmakefile|CMakeLists\.txt|build\.gradle|settings\.gradle|pom\.xml|tsconfig\.json|Dockerfile|docker-compose\.(ya?ml)|\.env(\..+)?|Procfile|Rakefile|Cakefile|Taskfile|Justfile|Fastfile|Guardfile|Vagrantfile|Berksfile|SConstruct|SConscript|Jenkinsfile|\.gitignore|\.gitattributes|\.editorconfig|\.npmrc|\.htaccess|nginx\.conf|\.bashrc|\.bash_profile|\.zshrc|\.profile|\.vimrc|\.tmux\.conf|init\.(vim|lua)|\.eslintrc(\.(json|js|ya?ml))?|\.prettierrc(\.(json|js|ya?ml))?|\.gitlab-ci\.(ya?ml)|\.github\/workflows\/.*\.(ya?ml)|\.circleci/config\.(ya?ml))$
+                ).?;
 
-                    for (valid_files.items, 0..) |file, i| {
-                        if (code_regex.isMatch(file)) {
-                            var output = try process(res, allocator, &client, file);
-                            defer output.deinit();
-                            const msg = try std.json.parseFromSlice(struct { message: struct { content: []const u8 } }, allocator, output.written(), .{ .ignore_unknown_fields = true });
-                            defer msg.deinit();
-                            if (res.args.json != 0) {
-                                const escaped = try escapeString(allocator, msg.value.message.content);
-                                defer allocator.free(escaped);
-                                try out.print("{{ \"file\": \"{s}\", \"summary\": \"{s}\" }}", .{ file, escaped });
-                                if (i != valid_files.items.len - 1)
-                                    _ = try out.writeAll(", ");
-                            } else {
-                                _ = try out.writeAll(msg.value.message.content);
-                            }
+                for (valid_files.items, 0..) |file, i| {
+                    if (code_regex.isMatch(file)) {
+                        var output = try process(res, allocator, &client, &endpoint, file);
+                        defer output.deinit();
+                        const msg = try std.json.parseFromSlice(struct { message: struct { content: []const u8 } }, allocator, output.written(), .{ .ignore_unknown_fields = true });
+                        defer msg.deinit();
+                        if (res.args.json != 0) {
+                            const escaped = try escapeString(allocator, msg.value.message.content);
+                            defer allocator.free(escaped);
+                            try out.print("{{ \"file\": \"{s}\", \"summary\": \"{s}\" }}", .{ file, escaped });
+                            if (i != valid_files.items.len - 1)
+                                _ = try out.writeAll(", ");
+                        } else {
+                            _ = try out.writeAll(msg.value.message.content);
                         }
                     }
-                    if (res.args.json != 0) {
-                        _ = try out.writeAll(" ]");
-                    }
-                    try out.flush();
-                    return;
-                },
-                else => {},
-            }
+                }
+                if (res.args.json != 0) {
+                    _ = try out.writeAll(" ]");
+                }
+                try out.flush();
+                return;
+            },
+            else => {},
         }
     }
     std.debug.print("Unsupported usage.\nUse -h to display help message.\n", .{});
 }
 
-pub fn process(res: anytype, allocator: std.mem.Allocator, client: *std.http.Client, filename: []const u8) !std.Io.Writer.Allocating {
+pub fn process(res: anytype, allocator: std.mem.Allocator, client: *std.http.Client, endpoint: *std.Uri, filename: []const u8) !std.Io.Writer.Allocating {
     var response_writer = std.Io.Writer.Allocating.init(allocator);
     defer response_writer.deinit();
     var user2 = std.Io.Writer.Allocating.init(allocator);
     defer user2.deinit();
     var final_response_writer = std.Io.Writer.Allocating.init(allocator);
-    const endpoint = res.args.endpoint orelse "http://127.0.0.1:11434";
-    var url_buffer: [64]u8 = undefined;
-    const url = try std.fmt.bufPrint(&url_buffer, "{s}/api/chat", .{endpoint});
+
+    switch (res.args.provider orelse .ollama) {
+        .ollama => endpoint.path = .{ .raw = "/api/chat" },
+        .openrouter => endpoint.path = .{ .raw = "/api/v1/chat/completions" },
+        else => return error.Unimplemented,
+    }
 
     var payload = std.Io.Writer.Allocating.init(allocator);
     defer payload.deinit();
@@ -253,29 +256,30 @@ pub fn process(res: anytype, allocator: std.mem.Allocator, client: *std.http.Cli
         \\Focus on accuracy over quantity. Most code has no vulnerabilities, and that's normal.
     ); //}}}
     defer allocator.free(system);
-    const user = try processFile(filename, allocator);
+    const user = try getContents(filename, allocator);
     defer allocator.free(user);
 
-    try payload.writer.print("{{ \"model\": \"{s}\", \"messages\": [{{ \"role\": \"system\", \"content\": \"{s}\" }}, {{ \"role\": \"user\", \"content\": \"{s}\" }}], \"temperature\": 0.1, \"stream\": false }}", .{ res.args.model.?, system, user });
+    switch (res.args.provider orelse .ollama) {
+        .ollama => try payload.writer.print("{{ \"model\": \"{s}\", \"messages\": [{{ \"role\": \"system\", \"content\": \"{s}\" }}, {{ \"role\": \"user\", \"content\": \"{s}\" }}], \"temperature\": 0.1, \"stream\": false }}", .{ res.args.model.?, system, user }),
+        .openrouter => try payload.writer.print("{{ \"model\": \"{s}\", \"messages\": [{{ \"role\": \"system\", \"content\": \"{s}\" }}, {{ \"role\": \"user\", \"content\": \"{s}\" }}], \"max_output_tokens\": \"{d}\" }}", .{ res.args.model.?, system, user, res.args.@"max-tokens" orelse return error.NoMaxToken }),
+        else => unreachable,
+    }
     try payload.writer.flush();
 
-    for (0..10) |i| {
+    for (0..(if (res.args.provider orelse .ollama == .ollama) 10 else 1)) |i| {
         try user2.writer.print("\\n\\nrun {d}:\\n", .{i + 1});
         const fetch_result = client.fetch(.{
-            .location = .{ .url = url },
+            .location = .{ .uri = endpoint.* },
             .response_writer = &response_writer.writer,
             .payload = payload.written(),
-            .headers = .{
-                .authorization = .{ .override = "Bearer " ++ @embedFile("API.KEY") },
-                .content_type = .{ .override = "application/json" },
-            },
         }) catch |e| {
             std.debug.print("{any}\n", .{e});
             std.process.exit(1);
         };
         if (@intFromEnum(fetch_result.status) != 200) {
             std.debug.print("error: non 200 status code: {d}: {?s}\n", .{ @intFromEnum(fetch_result.status), fetch_result.status.phrase() });
-            std.process.exit(1);
+            return final_response_writer;
+            //std.process.exit(1);
         }
         const msg = try std.json.parseFromSlice(struct { message: struct { content: []const u8 } }, allocator, response_writer.written(), .{ .ignore_unknown_fields = true });
         defer msg.deinit();
@@ -379,10 +383,14 @@ pub fn process(res: anytype, allocator: std.mem.Allocator, client: *std.http.Cli
     ); //}}}
     defer allocator.free(system2);
 
-    try payload2.writer.print("{{ \"model\": \"{s}\", \"messages\": [{{ \"role\": \"system\", \"content\": \"{s}\" }}, {{ \"role\": \"user\", \"content\": \"{s}\" }}], \"temperature\": 0.1, \"stream\": false }}", .{ res.args.model.?, system2, user2.written() });
+    switch (res.args.provider orelse .ollama) {
+        .ollama => try payload2.writer.print("{{ \"model\": \"{s}\", \"messages\": [{{ \"role\": \"system\", \"content\": \"{s}\" }}, {{ \"role\": \"user\", \"content\": \"{s}\" }}], \"temperature\": 0.1, \"stream\": false }}", .{ res.args.model.?, system2, user2.written() }),
+        .openrouter => try payload2.writer.print("{{ \"model\": \"{s}\", \"messages\": [{{ \"role\": \"system\", \"content\": \"{s}\" }}, {{ \"role\": \"user\", \"content\": \"{s}\" }}], \"max_output_tokens\": \"{d}\" }}", .{ res.args.model.?, system2, user2.written(), res.args.@"max-tokens".? }),
+        else => unreachable,
+    }
     try payload2.writer.flush();
     const fetch_result = client.fetch(.{
-        .location = .{ .url = url },
+        .location = .{ .uri = endpoint.* },
         .response_writer = &final_response_writer.writer,
         .payload = payload2.written(),
     }) catch |e| {
@@ -397,7 +405,7 @@ pub fn process(res: anytype, allocator: std.mem.Allocator, client: *std.http.Cli
     return final_response_writer;
 }
 
-pub fn processFile(filename: []const u8, allocator: std.mem.Allocator) ![]const u8 {
+pub fn getContents(filename: []const u8, allocator: std.mem.Allocator) ![]const u8 {
     const cwd = std.fs.cwd();
     const file = try cwd.openFile(filename, .{});
     defer file.close();
