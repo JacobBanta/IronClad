@@ -1,0 +1,21 @@
+.{
+    .name = .IronClad,
+    .version = "0.0.1",
+    .dependencies = .{
+        .clap = .{
+            .url = "git+https://github.com/Hejsil/zig-clap/?ref=0.11.0#5289e0753cd274d65344bef1c114284c633536ea",
+            .hash = "clap-0.11.0-oBajB-HnAQDPCKYzwF7rO3qDFwRcD39Q0DALlTSz5H7e",
+        },
+        .regex = .{
+            .url = "git+https://github.com/zig-utils/zig-regex#d75526a959a3be854c043a92d123de3adaac3147",
+            .hash = "regex-0.1.0-btRPGTu4BgBtkrBfHIWJiAcSjQ5KAHksgs448XGtzBJb",
+        },
+        .mvzr = .{
+            .url = "https://github.com/mnemnion/mvzr/archive/refs/tags/v0.3.7.tar.gz",
+            .hash = "mvzr-0.3.7-ZSOky5FtAQB2VrFQPNbXHQCFJxWTMAYEK7ljYEaMR6jt",
+        },
+    },
+    .minimum_zig_version = "0.15.2",
+    .paths = .{""},
+    .fingerprint = 0x9f2893e58056f23,
+}
