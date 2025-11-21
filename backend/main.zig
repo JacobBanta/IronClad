@@ -1,5 +1,6 @@
 const clap = @import("clap");
 const std = @import("std");
+const filter = @import("filter.zig");
 
 pub fn main() !void {
     var gpa = std.heap.DebugAllocator(.{}){};
@@ -100,20 +101,62 @@ pub fn main() !void {
             }
         }
         if (res.args.model != null) {
-            var output = try process(res, allocator, &client);
-            defer output.deinit();
-            const msg = try std.json.parseFromSlice(struct { message: struct { content: []const u8 } }, allocator, output.written(), .{ .ignore_unknown_fields = true });
-            defer msg.deinit();
+            switch (res.args.mode orelse .file) {
+                .file => {
+                    var output = try process(res, allocator, &client, res.args.file orelse return error.NoFileGiven);
+                    defer output.deinit();
+                    const msg = try std.json.parseFromSlice(struct { message: struct { content: []const u8 } }, allocator, output.written(), .{ .ignore_unknown_fields = true });
+                    defer msg.deinit();
 
-            _ = try out.writeAll(msg.value.message.content);
-            try out.flush();
-            return;
+                    if (res.args.json != 0) {
+                        const escaped = try escapeString(allocator, msg.value.message.content);
+                        defer allocator.free(escaped);
+                        try out.print("[ {{ \"file\": \"{s}\", \"summary\": \"{s}\" }} ]", .{ res.args.file.?, escaped });
+                    } else {
+                        _ = try out.writeAll(msg.value.message.content);
+                    }
+                    try out.flush();
+                    return;
+                },
+                .full => {
+                    var valid_files = try filter.findValidFiles(allocator, if (res.positionals.len > 1) res.positionals[0] else ".");
+                    defer {
+                        for (valid_files.items) |file| allocator.free(file);
+                        valid_files.deinit(allocator);
+                    }
+                    if (res.args.json != 0) {
+                        _ = try out.writeAll("[ ");
+                    }
+
+                    for (valid_files.items, 0..) |file, i| {
+                        var output = try process(res, allocator, &client, file);
+                        defer output.deinit();
+                        const msg = try std.json.parseFromSlice(struct { message: struct { content: []const u8 } }, allocator, output.written(), .{ .ignore_unknown_fields = true });
+                        defer msg.deinit();
+                        if (res.args.json != 0) {
+                            const escaped = try escapeString(allocator, msg.value.message.content);
+                            defer allocator.free(escaped);
+                            try out.print("{{ \"file\": \"{s}\", \"summary\": \"{s}\" }}", .{ res.args.file.?, escaped });
+                            if (i != valid_files.items.len - 1)
+                                _ = try out.writeAll(", ");
+                        } else {
+                            _ = try out.writeAll(msg.value.message.content);
+                        }
+                    }
+                    if (res.args.json != 0) {
+                        _ = try out.writeAll(" ]");
+                    }
+                    try out.flush();
+                    return;
+                },
+                else => {},
+            }
         }
     }
     std.debug.print("Unsupported usage.\nUse -h to display help message.\n", .{});
 }
 
-pub fn process(res: anytype, allocator: std.mem.Allocator, client: *std.http.Client) !std.Io.Writer.Allocating {
+pub fn process(res: anytype, allocator: std.mem.Allocator, client: *std.http.Client, filename: []const u8) !std.Io.Writer.Allocating {
     var response_writer = std.Io.Writer.Allocating.init(allocator);
     defer response_writer.deinit();
     var user2 = std.Io.Writer.Allocating.init(allocator);
@@ -125,63 +168,58 @@ pub fn process(res: anytype, allocator: std.mem.Allocator, client: *std.http.Cli
 
     var payload = std.Io.Writer.Allocating.init(allocator);
     defer payload.deinit();
-    switch (res.args.mode orelse .file) {
-        .file => {
-            const system = try escapeString(allocator, //{{{
-                \\You are an expert security analyst specializing in static code analysis. Your task is to analyze provided source code files and identify potential security vulnerabilities.
-                \\
-                \\ANALYSIS APPROACH:
-                \\- Examine ONLY the code explicitly provided to you
-                \\- Standard library functions are assumed safe unless you have a specific CVE/GHSA identifier
-                \\- "No vulnerabilities detected" is the NORMAL and EXPECTED outcome for most code
-                \\- Only report vulnerabilities you can prove with direct code evidence
-                \\
-                \\SEVERITY CLASSIFICATION:
-                \\- CRITICAL: Remote code execution, authentication bypass, or severe memory corruption with a complete exploitation chain visible in the code
-                \\- HIGH: Denial of service, privilege escalation, or significant data manipulation
-                \\- MEDIUM: Information disclosure or partial data manipulation requiring complex attack
-                \\- LOW: Minor issues, best practice violations, minimal impact
-                \\
-                \\SPECIFIC RULES FOR CRITICAL:
-                \\- CRITICAL requires overwhelming evidence and a complete exploitation path
-                \\- Integer/float overflow is ONLY CRITICAL if it DIRECTLY causes memory corruption (not just panics or errors)
-                \\- When uncertain between CRITICAL and HIGH, always choose HIGH
-                \\
-                \\OUTPUT FORMAT:
-                \\For each vulnerability found, provide:
-                \\1. Severity level
-                \\2. Vulnerability type
-                \\3. Exact location
-                \\4. Vulnerable code snippet
-                \\5. Description based on code evidence
-                \\6. Potential impact
-                \\7. Recommended fix
-                \\
-                \\CRITICAL FLAGGING:
-                \\- Include `CRITICAL` at the start only if you found critical vulnerabilities
-                \\- If no critical vulnerabilities exist, do NOT use the word `CRITICAL` anywhere
-                \\
-                \\BREVITY RULE:
-                \\- If you find NO vulnerabilities, respond with exactly: "No vulnerabilities detected."
-                \\- Do NOT add any additional text, explanations, or advice
-                \\- This is the expected and correct response for safe code
-                \\
-                \\BEFORE REPORTING ANY VULNERABILITY:
-                \\- Verify it's not a standard library function (these are safe)
-                \\- Verify you have direct code evidence for every claim
-                \\- Verify you're not speculating about data flow or runtime behavior
-                \\- When in doubt, classify as LOW/MEDIUM, not CRITICAL
-                \\
-                \\Focus on accuracy over quantity. Most code has no vulnerabilities, and that's normal.
-            ); //}}}
-            defer allocator.free(system);
-            const user = try processFile(res.args.file orelse return error.NoFileGiven, allocator);
-            defer allocator.free(user);
+    const system = try escapeString(allocator, //{{{
+        \\You are an expert security analyst specializing in static code analysis. Your task is to analyze provided source code files and identify potential security vulnerabilities.
+        \\
+        \\ANALYSIS APPROACH:
+        \\- Examine ONLY the code explicitly provided to you
+        \\- Standard library functions are assumed safe unless you have a specific CVE/GHSA identifier
+        \\- "No vulnerabilities detected" is the NORMAL and EXPECTED outcome for most code
+        \\- Only report vulnerabilities you can prove with direct code evidence
+        \\
+        \\SEVERITY CLASSIFICATION:
+        \\- CRITICAL: Remote code execution, authentication bypass, or severe memory corruption with a complete exploitation chain visible in the code
+        \\- HIGH: Denial of service, privilege escalation, or significant data manipulation
+        \\- MEDIUM: Information disclosure or partial data manipulation requiring complex attack
+        \\- LOW: Minor issues, best practice violations, minimal impact
+        \\
+        \\SPECIFIC RULES FOR CRITICAL:
+        \\- CRITICAL requires overwhelming evidence and a complete exploitation path
+        \\- Integer/float overflow is ONLY CRITICAL if it DIRECTLY causes memory corruption (not just panics or errors)
+        \\- When uncertain between CRITICAL and HIGH, always choose HIGH
+        \\
+        \\OUTPUT FORMAT:
+        \\For each vulnerability found, provide:
+        \\1. Severity level
+        \\2. Vulnerability type
+        \\3. Exact location
+        \\4. Vulnerable code snippet
+        \\5. Description based on code evidence
+        \\6. Potential impact
+        \\7. Recommended fix
+        \\
+        \\CRITICAL FLAGGING:
+        \\- Include `CRITICAL` at the start only if you found critical vulnerabilities
+        \\- If no critical vulnerabilities exist, do NOT use the word `CRITICAL` anywhere
+        \\
+        \\BREVITY RULE:
+        \\- If you find NO vulnerabilities, respond with exactly: "No vulnerabilities detected."
+        \\- Do NOT add any additional text, explanations, or advice
+        \\- This is the expected and correct response for safe code
+        \\
+        \\BEFORE REPORTING ANY VULNERABILITY:
+        \\- Verify it's not a standard library function (these are safe)
+        \\- Verify you have direct code evidence for every claim
+        \\- Verify you're not speculating about data flow or runtime behavior
+        \\- When in doubt, classify as LOW/MEDIUM, not CRITICAL
+        \\
+        \\Focus on accuracy over quantity. Most code has no vulnerabilities, and that's normal.
+    ); //}}}
+    defer allocator.free(system);
+    const user = try processFile(filename, allocator);
+    defer allocator.free(user);
 
-            try payload.writer.print("{{ \"model\": \"{s}\", \"messages\": [{{ \"role\": \"system\", \"content\": \"{s}\" }}, {{ \"role\": \"user\", \"content\": \"{s}\" }}], \"temperature\": 0.1, \"stream\": false }}", .{ res.args.model.?, system, user });
-        },
-        else => {},
-    }
+    try payload.writer.print("{{ \"model\": \"{s}\", \"messages\": [{{ \"role\": \"system\", \"content\": \"{s}\" }}, {{ \"role\": \"user\", \"content\": \"{s}\" }}], \"temperature\": 0.1, \"stream\": false }}", .{ res.args.model.?, system, user });
     try payload.writer.flush();
 
     for (0..10) |i| {
@@ -207,95 +245,100 @@ pub fn process(res: anytype, allocator: std.mem.Allocator, client: *std.http.Cli
     }
     var payload2 = std.Io.Writer.Allocating.init(allocator);
     defer payload2.deinit();
-    switch (res.args.mode orelse .file) {
-        .file => {
-            const system = try escapeString(allocator, //{{{
-                \\You are an expert security analyst specializing in aggregating and correlating static code analysis results from multiple scanning runs. Your task is to analyze multiple vulnerability reports and produce a consolidated, accurate summary.
-                \\
-                \\AGGREGATION PRINCIPLES:
-                \\- **Consensus matters**: Vulnerabilities reported consistently across multiple runs are more likely to be real
-                \\- **Solo findings are suspicious**: A vulnerability found in only 1 of 10 runs is likely a false positive
-                \\- **Standard library functions are safe**: If any report claims a stdlib vulnerability, treat it as a false positive
-                \\- **CRITICAL findings require overwhelming evidence**: Only flag CRITICAL if multiple runs independently confirm it
-                \\
-                \\ANALYSIS PROCESS:
-                \\1. Count how many runs reported "No vulnerabilities detected"
-                \\2. Extract all vulnerability findings from runs that reported issues
-                \\3. Group findings by: vulnerability type, location, and code snippet
-                \\4. For each distinct finding, note how many runs reported it
-                \\5. Apply false positive heuristics (see below)
-                \\6. Consolidate findings and assign confidence levels
-                \\
-                \\FALSE POSITIVE HEURISTICS:
-                \\- **Single-run findings**: Automatically suspect unless extremely well-documented
-                \\- **Stdlib claims**: Always false positives (Go/Rust/Zig stdlibs are memory-safe)
-                \\- **Inconsistent details**: Same location but different descriptions = likely hallucination
-                \\- **Severity escalation**: "Error" → "RCE" without clear mechanism = downgrade
-                \\- **Missing evidence**: No code snippet or vague location = discard
-                \\
-                \\CONFIDENCE LEVELS:
-                \\- **HIGH**: 3+ runs report identical vulnerability with same location and code
-                \\- **MEDIUM**: 2 runs report similar vulnerability with consistent details
-                \\- **LOW**: Single run reports vulnerability (treat as probable false positive)
-                \\- **FALSE POSITIVE**: Stdlib claims or contradictory reports
-                \\
-                \\OUTPUT FORMAT:
-                \\```
-                \\AGGREGATION SUMMARY
-                \\Total runs analyzed: [N]
-                \\Runs with no findings: [N]
-                \\Runs with findings: [N]
-                \\
-                \\CONSOLIDATED FINDINGS:
-                \\[If none]: No vulnerabilities detected across all runs.
-                \\
-                \\[If findings exist, for each]:
-                \\1. Vulnerability: [Type]
-                \\   Severity: [LOW/MEDIUM/HIGH/CRITICAL]
-                \\   Location: [File:Line]
-                \\   Code: [Snippet]
-                \\   Confidence: [HIGH/MEDIUM/LOW]
-                \\   Reported in: [X of N runs]
-                \\   Description: [Consolidated description from reports]
-                \\   Recommended fix: [Consolidated fix]
-                \\
-                \\CRITICAL SUMMARY:
-                \\[If any CRITICAL findings with HIGH/MEDIUM confidence, list them]
-                \\[If no CRITICAL findings, state: "No CRITICAL vulnerabilities confirmed"]
-                \\
-                \\FALSE POSITIVES IDENTIFIED:
-                \\[List any findings you flagged as false positives with reasoning]
-                \\```
-                \\
-                \\CRITICAL FLAGGING RULES:
-                \\- Include `CRITICAL` at the start of your response ONLY if you have HIGH or MEDIUM confidence CRITICAL findings
-                \\- If no CRITICAL vulnerabilities are confirmed, do NOT use the word `CRITICAL` anywhere in your response
-                \\
-                \\EXAMPLE OUTPUT:
-                \\```
-                \\AGGREGATION SUMMARY
-                \\Total runs analyzed: 10
-                \\Runs with no findings: 9
-                \\Runs with findings: 1
-                \\
-                \\CONSOLIDATED FINDINGS:
-                \\No vulnerabilities detected across all runs.
-                \\
-                \\CRITICAL SUMMARY:
-                \\No CRITICAL vulnerabilities confirmed.
-                \\
-                \\FALSE POSITIVES IDENTIFIED:
-                \\- Claimed buffer overflow in strconv.ParseFloat (1 run) - Go stdlib is memory-safe, this is a false positive
-                \\```
-                \\
-                \\Focus on producing a conservative, accurate summary that prioritizes avoiding false positives over reporting questionable findings.
-            ); //}}}
-            defer allocator.free(system);
+    const system2 = try escapeString(allocator, //{{{
+        \\You are an expert security analyst specializing in aggregating and correlating static code analysis results from multiple scanning runs. Your task is to analyze multiple vulnerability reports and produce a consolidated, accurate summary.
+        \\
+        \\AGGREGATION PRINCIPLES:
+        \\- **Consensus matters**: Vulnerabilities reported consistently across multiple runs are more likely to be real
+        \\- **Solo findings are suspicious**: A vulnerability found in only 1 of 10 runs is likely a false positive
+        \\- **Standard library functions are safe**: If any report claims a stdlib vulnerability, treat it as a false positive
+        \\- **CRITICAL findings require overwhelming evidence**: Only flag CRITICAL if multiple runs independently confirm it
+        \\
+        \\ANALYSIS PROCESS:
+        \\1. Count how many runs reported "No vulnerabilities detected"
+        \\2. Extract all vulnerability findings from runs that reported issues
+        \\3. Group findings by: vulnerability type, location, and code snippet
+        \\4. For each distinct finding, note how many runs reported it
+        \\5. Apply false positive heuristics (see below)
+        \\6. Consolidate findings and assign confidence levels
+        \\
+        \\FALSE POSITIVE HEURISTICS:
+        \\- **Single-run findings**: Automatically suspect unless extremely well-documented
+        \\- **Stdlib claims**: Always false positives (Go/Rust/Zig stdlibs are memory-safe)
+        \\- **Inconsistent details**: Same location but different descriptions = likely hallucination
+        \\- **Severity escalation**: "Error" → "RCE" without clear mechanism = downgrade
+        \\- **Missing evidence**: No code snippet or vague location = discard
+        \\
+        \\CONFIDENCE LEVELS:
+        \\- **HIGH**: 3+ runs report identical vulnerability with same location and code
+        \\- **MEDIUM**: 2 runs report similar vulnerability with consistent details
+        \\- **LOW**: Single run reports vulnerability (treat as probable false positive)
+        \\- **FALSE POSITIVE**: Stdlib claims or contradictory reports
+        \\
+        \\OUTPUT FORMAT:
+        \\```
+        \\SUMMARY
+        \\Total runs analyzed: [N]
+        \\Runs with no findings: [N]
+        \\Runs with findings: [N]
+        \\
+        \\CONSOLIDATED FINDINGS:
+        \\[If none]: No vulnerabilities detected across all runs.
+        \\
+        \\[If findings exist, for each]:
+        \\1. Vulnerability: [Type]
+        \\   Severity: [LOW/MEDIUM/HIGH/CRITICAL]
+        \\   Location: [File:Line]
+        \\   Code: [Snippet]
+        \\   Confidence: [HIGH/MEDIUM/LOW]
+        \\   Reported in: [X of N runs]
+        \\   Description: [Consolidated description from reports]
+        \\   Recommended fix: [Consolidated fix]
+        \\
+        \\CRITICAL SUMMARY:
+        \\[If any CRITICAL findings with HIGH/MEDIUM confidence, list them]
+        \\[If no CRITICAL findings, state: "No CRITICAL vulnerabilities confirmed"]
+        \\
+        \\FALSE POSITIVES IDENTIFIED:
+        \\[List any findings you flagged as false positives with reasoning]
+        \\```
+        \\
+        \\Some of these fields may be ommited if they are not relevant.
+        \\
+        \\CRITICAL FLAGGING RULES:
+        \\- Include `CRITICAL` at the start of your response ONLY if you have HIGH or MEDIUM confidence CRITICAL findings
+        \\- If no CRITICAL vulnerabilities are confirmed, do NOT use the word `CRITICAL` anywhere in your response
+        \\
+        \\EXAMPLE OUTPUT:
+        \\```
+        \\SUMMARY
+        \\Total runs analyzed: 10
+        \\Runs with no findings: 9
+        \\Runs with findings: 1
+        \\
+        \\CONSOLIDATED FINDINGS:
+        \\No vulnerabilities detected across all runs.
+        \\
+        \\FALSE POSITIVES IDENTIFIED:
+        \\- Claimed buffer overflow in strconv.ParseFloat (1 run) - Go stdlib is memory-safe, this is a false positive
+        \\```
+        \\
+        \\EXAMPLE OUTPUT 2:
+        \\```
+        \\SUMMARY
+        \\Total runs analyzed: 10
+        \\Runs with no findings: 10
+        \\Runs with findings: 0
+        \\
+        \\CONSOLIDATED FINDINGS:
+        \\No vulnerabilities detected.
+        \\```
+        \\
+        \\Focus on producing a conservative, accurate summary that prioritizes avoiding false positives over reporting questionable findings.
+    ); //}}}
+    defer allocator.free(system2);
 
-            try payload2.writer.print("{{ \"model\": \"{s}\", \"messages\": [{{ \"role\": \"system\", \"content\": \"{s}\" }}, {{ \"role\": \"user\", \"content\": \"{s}\" }}], \"temperature\": 0.1, \"stream\": false }}", .{ res.args.model.?, system, user2.written() });
-        },
-        else => {},
-    }
+    try payload2.writer.print("{{ \"model\": \"{s}\", \"messages\": [{{ \"role\": \"system\", \"content\": \"{s}\" }}, {{ \"role\": \"user\", \"content\": \"{s}\" }}], \"temperature\": 0.1, \"stream\": false }}", .{ res.args.model.?, system2, user2.written() });
     try payload2.writer.flush();
     const fetch_result = client.fetch(.{
         .location = .{ .url = url },
